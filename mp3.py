@@ -11,6 +11,7 @@ Run with the Python inside gamdl's environment (it has mutagen); musesh does thi
 """
 
 import argparse
+import json
 import os
 import shutil
 import signal
@@ -24,7 +25,7 @@ from pathlib import Path
 import mutagen
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from ui import bold, cyan, die, dim, green, heading, note, ok, red, summary, tilde, warn, yellow  # noqa: E402
+from ui import bold, cyan, die, dim, green, heading, note, ok, prompt, red, summary, tilde, warn, yellow  # noqa: E402
 
 TARGET_KBPS = 320
 SOURCE_EXTS = {".m4a", ".mp3", ".flac", ".wav", ".aif", ".aiff", ".ogg", ".opus", ".aac"}
@@ -185,7 +186,7 @@ def run(src_root, dst_root, jobs_n, assume_yes=False):
         if len(orphans) > 8:
             note(f"  ... and {len(orphans) - 8} more")
         if not assume_yes and sys.stdin.isatty():
-            ans = input(f"{yellow('?')} Delete them from the MP3 folder too? {dim('[y/N]')} ").strip().lower()
+            ans = prompt(f"{yellow('?')} Delete them from the MP3 folder too? {dim('[y/N]')} ").strip().lower()
             if ans.startswith("y"):
                 for p in orphans:
                     p.unlink(missing_ok=True)
@@ -251,6 +252,40 @@ def decodes_cleanly(path):
     return r.returncode == 0 and not r.stderr.strip()
 
 
+class VerifiedCache:
+    """MP3s that passed prune's checks, keyed by path, with the size/mtime of the MP3 and its
+    original at that moment. Any change to either means it gets checked again."""
+
+    def __init__(self, dst_root):
+        self.root = dst_root
+        self.path = dst_root / ".musesh" / "verified.json"
+        try:
+            self.entries = json.loads(self.path.read_text())
+        except (OSError, ValueError):
+            self.entries = {}
+
+    @staticmethod
+    def _stamp(src, dest):
+        s, d = src.stat(), dest.stat()
+        return [d.st_mtime, d.st_size, s.st_mtime, s.st_size]
+
+    def still_good(self, src, dest):
+        key = str(dest.relative_to(self.root))
+        try:
+            return key in self.entries and self.entries[key] == self._stamp(src, dest)
+        except OSError:
+            return False
+
+    def mark(self, src, dest):
+        self.entries[str(dest.relative_to(self.root))] = self._stamp(src, dest)
+
+    def save(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(self.entries))
+        tmp.replace(self.path)
+
+
 def verify(src, dest):
     """None if dest is a good MP3 of src, otherwise the reason it isn't."""
     if not dest.exists():
@@ -283,27 +318,43 @@ def prune(src_root, dst_root, jobs_n):
         return 0
 
     pairs = [(src, (dst_root / src.relative_to(src_root)).with_suffix(".mp3")) for src in originals]
+
+    # MP3s that passed before and haven't changed since (nor has their original) don't need
+    # decoding again - so a cancelled or mistyped prune doesn't cost a full re-check.
+    cache = VerifiedCache(dst_root)
+    todo = [(s, d) for s, d in pairs if not cache.still_good(s, d)]
+    reused = len(pairs) - len(todo)
     problems, checked = [], 0
     live = sys.stdout.isatty()
     print()
+    if reused:
+        note(f"{reused} MP3(s) already verified and unchanged - not checked again")
     pool = ThreadPoolExecutor(max_workers=jobs_n)
-    futures = {pool.submit(verify, s, d): (s, d) for s, d in pairs}
+    futures = {pool.submit(verify, s, d): (s, d) for s, d in todo}
     try:
         for fut in as_completed(futures):
             checked += 1
+            src, dest = futures[fut]
             reason = fut.result()
             if reason:
-                problems.append((futures[fut][0], reason))
+                problems.append((src, reason))
+            else:
+                cache.mark(src, dest)
+            if checked % 50 == 0:
+                cache.save()
             if live:
-                print(f"\r  {dim('verifying')} {checked}/{len(pairs)}"
+                print(f"\r  {dim('verifying')} {checked}/{len(todo)}"
                       f"{('  ' + red(str(len(problems)) + ' problem(s)')) if problems else ''}   ",
                       end="", flush=True)
     except KeyboardInterrupt:
         pool.shutdown(wait=False, cancel_futures=True)
-        print(f"\n  {dim('stopped - nothing was deleted')}")
+        cache.save()
+        print(f"\n  {dim('stopped - nothing was deleted; what was verified so far is remembered')}")
         return 130
     pool.shutdown()
-    print(f"\r  {dim('verified')} {len(pairs)}/{len(pairs)}" + " " * 30)
+    cache.save()
+    if todo:
+        print(f"\r  {dim('verified')} {len(todo)}/{len(todo)}" + " " * 30)
 
     if problems:
         print()
@@ -327,8 +378,18 @@ def prune(src_root, dst_root, jobs_n):
     ok(f"All {len(pairs)} originals have a verified 320 kbps MP3 in {tilde(dst_root)}.")
     print(f"\n  Deleting them frees {bold(f'{size / 1024 ** 3:.2f} GB')}. "
           f"{red('This cannot be undone')} {dim('(you can re-download Apple Music songs with musesh)')}.")
-    if input(f"{yellow('?')} Type {bold('delete')} to remove the {len(pairs)} originals: ").strip().lower() != "delete":
-        note("Nothing deleted.")
+    for attempt in range(3):
+        answer = prompt(f"{yellow('?')} Type {bold('delete')} to remove the {len(pairs)} originals "
+                        f"{dim('(Enter to cancel)')}: ").strip().lower()
+        if answer == "delete":
+            break
+        if answer in ("", "n", "no", "cancel", "q"):
+            note("Nothing deleted. The verification is remembered, so the next prune goes straight to this question.")
+            return 1
+        if attempt < 2:
+            note(f"that wasn't 'delete' ({answer!r}) - try again, or press Enter to cancel")
+    else:
+        note("Nothing deleted. The verification is remembered, so the next prune goes straight to this question.")
         return 1
 
     record = dst_root / PRUNED_RECORD

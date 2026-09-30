@@ -7,8 +7,32 @@ import os
 import sys
 from pathlib import Path
 
+try:
+    # With readline loaded, input() does its own line editing (Backspace, arrows, Ctrl-U),
+    # instead of relying on the terminal's cooked mode, which child processes can disturb.
+    import readline  # noqa: F401
+except ImportError:
+    pass
+
+try:
+    import termios
+    _TTY_ATTRS = termios.tcgetattr(sys.stdin) if sys.stdin.isatty() else None
+except Exception:  # not a terminal, or no termios
+    _TTY_ATTRS = None
+
 HOME = Path.home()
 COLOR = sys.stdout.isatty() and not os.environ.get("NO_COLOR")
+
+
+def prompt(text=""):
+    """input() with the terminal settings from startup restored first (ffmpeg and friends can
+    leave it in a mode where Backspace prints garbage)."""
+    if _TTY_ATTRS is not None:
+        try:
+            termios.tcsetattr(sys.stdin, termios.TCSANOW, _TTY_ATTRS)
+        except Exception:
+            pass
+    return input(text)
 
 
 def _style(code):

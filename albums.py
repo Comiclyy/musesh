@@ -17,6 +17,7 @@ from pathlib import Path
 import httpx
 
 import library_dl as L
+from ui import prompt as tty_input
 
 ITUNES_LOOKUP_URL = "https://itunes.apple.com/lookup"
 MB_PER_TRACK = 8  # 256 kbps AAC, ~4 minute song
@@ -214,7 +215,7 @@ async def main():
         return 0
     if not todo:
         return 1 if missing else 0
-    if not args.yes and input("Download them? [Y/n] ").strip().lower() not in ("", "y", "yes"):
+    if not args.yes and tty_input("Download them? [Y/n] ").strip().lower() not in ("", "y", "yes"):
         return 1
 
     L.run_gamdl(todo, state_dir, cookies, out_dir, [], progress)

@@ -164,7 +164,13 @@ It never runs by itself.
    any broken MP3s so the next `musesh mp3` redoes them, and stops.
 3. **If everything passes,** it shows the space to be freed and asks you to
    type `delete`. Then it removes the originals and the folders they leave
-   empty. Your own MP3s stay.
+   empty. Your own MP3s stay. A typo just asks again (three tries); Enter
+   cancels.
+
+Verification results are remembered in `<mp3 folder>/.musesh/verified.json`.
+MP3s that passed and haven't changed since (and whose originals haven't
+either) aren't decoded again, so after a cancelled or stopped prune the next
+one goes straight to the question.
 
 Pruned songs are recorded in `<mp3 folder>/.musesh/`, so later `musesh mp3`
 runs never mistake their MP3s for orphans.

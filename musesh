@@ -23,6 +23,7 @@ AUDIO_EXTS = (".m4a", ".mp3", ".flac", ".alac", ".aac", ".wav", ".aiff", ".ogg",
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ui import accent, accent_bold, bold, cyan, die, dim, green, heading, note, ok, red, summary, tilde, warn  # noqa: E402
+from ui import prompt as tty_input  # noqa: E402
 
 FORMATS_SCRIPT = Path(__file__).resolve().parent / "formats.py"
 MP3_SCRIPT = Path(__file__).resolve().parent / "mp3.py"
@@ -104,7 +105,7 @@ def clean_path(text):
 
 
 def ask(prompt=""):
-    return input(f"{accent('›')} {prompt}")
+    return tty_input(f"{accent('›')} {prompt}")
 
 
 def pick(title, options, allow_custom=True, custom_prompt="Path"):
@@ -128,7 +129,7 @@ def pick(title, options, allow_custom=True, custom_prompt="Path"):
 
 
 def confirm(question, default=True):
-    ans = input(f"{accent('?')} {question} {dim('[Y/n]' if default else '[y/N]')} ").strip().lower()
+    ans = tty_input(f"{accent('?')} {question} {dim('[Y/n]' if default else '[y/N]')} ").strip().lower()
     return default if not ans else ans.startswith("y")
 
 
