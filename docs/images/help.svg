@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="910" height="524" viewBox="0 0 910 524">
-<rect width="910" height="524" rx="10" fill="#16171d"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="910" height="543" viewBox="0 0 910 543">
+<rect width="910" height="543" rx="10" fill="#16171d"/>
 <path d="M0 10a10 10 0 0 1 10-10h890a10 10 0 0 1 10 10v18H0z" fill="#22242c"/>
 <circle cx="20" cy="14" r="5.5" fill="#ff5f57"/>
 <circle cx="38" cy="14" r="5.5" fill="#febc2e"/>
@@ -18,17 +18,18 @@
 <text x="22" y="217"><tspan fill="#d4d7de">&#160;&#160;</tspan><tspan fill="#d4d7de" font-weight="700">KEEP&#160;AN&#160;EYE&#160;ON&#160;IT</tspan></text>
 <text x="22" y="236"><tspan fill="#d4d7de">&#160;&#160;&#160;&#160;</tspan><tspan fill="#d783e8">musesh</tspan><tspan fill="#d4d7de">&#160;</tspan><tspan fill="#6fc8d6">watch</tspan><tspan fill="#d4d7de">&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;follow&#160;a&#160;download&#160;running&#160;in&#160;the&#160;background,&#160;live</tspan></text>
 <text x="22" y="255"><tspan fill="#d4d7de">&#160;&#160;&#160;&#160;</tspan><tspan fill="#d783e8">musesh</tspan><tspan fill="#d4d7de">&#160;</tspan><tspan fill="#6fc8d6">status</tspan><tspan fill="#d4d7de">&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;songs&#160;downloaded,&#160;what&#x27;s&#160;running,&#160;what&#x27;s&#160;unmatched</tspan></text>
-<text x="22" y="274"><tspan fill="#d4d7de">&#160;&#160;&#160;&#160;</tspan><tspan fill="#d783e8">musesh</tspan><tspan fill="#d4d7de">&#160;</tspan><tspan fill="#6fc8d6">formats</tspan><tspan fill="#d4d7de">&#160;</tspan><tspan fill="#6c7280">[all|diff]</tspan><tspan fill="#d4d7de">&#160;&#160;&#160;file&#160;types&#160;and&#160;quality:&#160;a&#160;summary,&#160;every&#160;file,&#160;or&#160;only&#160;the&#160;odd&#160;ones&#160;out</tspan></text>
-<text x="22" y="293"></text>
-<text x="22" y="312"><tspan fill="#d4d7de">&#160;&#160;</tspan><tspan fill="#d4d7de" font-weight="700">TIDY&#160;UP&#160;AND&#160;TAKE&#160;IT&#160;WITH&#160;YOU</tspan></text>
-<text x="22" y="331"><tspan fill="#d4d7de">&#160;&#160;&#160;&#160;</tspan><tspan fill="#d783e8">musesh</tspan><tspan fill="#d4d7de">&#160;</tspan><tspan fill="#6fc8d6">clean</tspan><tspan fill="#d4d7de">&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;remove&#160;folders&#160;(and&#160;leftover&#160;lyrics)&#160;emptied&#160;by&#160;deleting&#160;music</tspan></text>
-<text x="22" y="350"><tspan fill="#d4d7de">&#160;&#160;&#160;&#160;</tspan><tspan fill="#d783e8">musesh</tspan><tspan fill="#d4d7de">&#160;</tspan><tspan fill="#6fc8d6">mp3</tspan><tspan fill="#d4d7de">&#160;</tspan><tspan fill="#6c7280">[folder]</tspan><tspan fill="#d4d7de">&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;convert&#160;the&#160;library&#160;to&#160;320&#160;kbps&#160;MP3&#160;-&#160;a&#160;USB&#160;drive&#160;by&#160;default,&#160;or&#160;any&#160;folder</tspan></text>
-<text x="22" y="369"><tspan fill="#d4d7de">&#160;&#160;&#160;&#160;</tspan><tspan fill="#d783e8">musesh</tspan><tspan fill="#d4d7de">&#160;</tspan><tspan fill="#6fc8d6">prune</tspan><tspan fill="#d4d7de">&#160;</tspan><tspan fill="#6c7280">[folder]</tspan><tspan fill="#d4d7de">&#160;&#160;&#160;&#160;&#160;&#160;&#160;after&#160;&#x27;mp3&#x27;:&#160;verify&#160;every&#160;file&#160;converted,&#160;then&#160;delete&#160;the&#160;non-MP3&#160;originals</tspan></text>
-<text x="22" y="388"></text>
-<text x="22" y="407"><tspan fill="#d4d7de">&#160;&#160;</tspan><tspan fill="#d4d7de" font-weight="700">FILES</tspan></text>
-<text x="22" y="426"><tspan fill="#d4d7de">&#160;&#160;&#160;&#160;</tspan><tspan fill="#6c7280">library&#160;&#160;&#160;</tspan><tspan fill="#d4d7de">&#160;&#160;~/Music/Library&#160;Download</tspan></text>
-<text x="22" y="445"><tspan fill="#d4d7de">&#160;&#160;&#160;&#160;</tspan><tspan fill="#6c7280">album&#160;list</tspan><tspan fill="#d4d7de">&#160;&#160;~/Documents/musesh-albums.txt</tspan></text>
-<text x="22" y="464"><tspan fill="#d4d7de">&#160;&#160;&#160;&#160;</tspan><tspan fill="#6c7280">settings&#160;&#160;</tspan><tspan fill="#d4d7de">&#160;&#160;~/.config/musesh/last-run.json</tspan></text>
-<text x="22" y="483"></text>
+<text x="22" y="274"><tspan fill="#d4d7de">&#160;&#160;&#160;&#160;</tspan><tspan fill="#d783e8">musesh</tspan><tspan fill="#d4d7de">&#160;</tspan><tspan fill="#6fc8d6">library</tspan><tspan fill="#d4d7de">&#160;</tspan><tspan fill="#6c7280">[band]</tspan><tspan fill="#d4d7de">&#160;&#160;&#160;&#160;&#160;&#160;&#160;every&#160;band,&#160;its&#160;albums,&#160;song&#160;counts,&#160;sizes,&#160;formats;&#160;--by&#160;size&#160;or&#160;songs</tspan></text>
+<text x="22" y="293"><tspan fill="#d4d7de">&#160;&#160;&#160;&#160;</tspan><tspan fill="#d783e8">musesh</tspan><tspan fill="#d4d7de">&#160;</tspan><tspan fill="#6fc8d6">formats</tspan><tspan fill="#d4d7de">&#160;</tspan><tspan fill="#6c7280">[all|diff]</tspan><tspan fill="#d4d7de">&#160;&#160;&#160;file&#160;types&#160;and&#160;quality:&#160;a&#160;summary,&#160;every&#160;file,&#160;or&#160;only&#160;the&#160;odd&#160;ones&#160;out</tspan></text>
+<text x="22" y="312"></text>
+<text x="22" y="331"><tspan fill="#d4d7de">&#160;&#160;</tspan><tspan fill="#d4d7de" font-weight="700">TIDY&#160;UP&#160;AND&#160;TAKE&#160;IT&#160;WITH&#160;YOU</tspan></text>
+<text x="22" y="350"><tspan fill="#d4d7de">&#160;&#160;&#160;&#160;</tspan><tspan fill="#d783e8">musesh</tspan><tspan fill="#d4d7de">&#160;</tspan><tspan fill="#6fc8d6">clean</tspan><tspan fill="#d4d7de">&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;remove&#160;folders&#160;(and&#160;leftover&#160;lyrics)&#160;emptied&#160;by&#160;deleting&#160;music</tspan></text>
+<text x="22" y="369"><tspan fill="#d4d7de">&#160;&#160;&#160;&#160;</tspan><tspan fill="#d783e8">musesh</tspan><tspan fill="#d4d7de">&#160;</tspan><tspan fill="#6fc8d6">mp3</tspan><tspan fill="#d4d7de">&#160;</tspan><tspan fill="#6c7280">[folder]</tspan><tspan fill="#d4d7de">&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;convert&#160;the&#160;library&#160;to&#160;320&#160;kbps&#160;MP3&#160;-&#160;a&#160;USB&#160;drive&#160;by&#160;default,&#160;or&#160;any&#160;folder</tspan></text>
+<text x="22" y="388"><tspan fill="#d4d7de">&#160;&#160;&#160;&#160;</tspan><tspan fill="#d783e8">musesh</tspan><tspan fill="#d4d7de">&#160;</tspan><tspan fill="#6fc8d6">prune</tspan><tspan fill="#d4d7de">&#160;</tspan><tspan fill="#6c7280">[folder]</tspan><tspan fill="#d4d7de">&#160;&#160;&#160;&#160;&#160;&#160;&#160;after&#160;&#x27;mp3&#x27;:&#160;verify&#160;every&#160;file&#160;converted,&#160;then&#160;delete&#160;the&#160;non-MP3&#160;originals</tspan></text>
+<text x="22" y="407"></text>
+<text x="22" y="426"><tspan fill="#d4d7de">&#160;&#160;</tspan><tspan fill="#d4d7de" font-weight="700">FILES</tspan></text>
+<text x="22" y="445"><tspan fill="#d4d7de">&#160;&#160;&#160;&#160;</tspan><tspan fill="#6c7280">library&#160;&#160;&#160;</tspan><tspan fill="#d4d7de">&#160;&#160;~/Music/Library&#160;Download</tspan></text>
+<text x="22" y="464"><tspan fill="#d4d7de">&#160;&#160;&#160;&#160;</tspan><tspan fill="#6c7280">album&#160;list</tspan><tspan fill="#d4d7de">&#160;&#160;~/Documents/musesh-albums.txt</tspan></text>
+<text x="22" y="483"><tspan fill="#d4d7de">&#160;&#160;&#160;&#160;</tspan><tspan fill="#6c7280">settings&#160;&#160;</tspan><tspan fill="#d4d7de">&#160;&#160;~/.config/musesh/last-run.json</tspan></text>
+<text x="22" y="502"></text>
 </g>
 </svg>

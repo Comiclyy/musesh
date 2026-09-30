@@ -130,6 +130,7 @@ musesh continue     # the next batch, same choices, no questions
 | `musesh align` | Offer only songs added to Apple Music since the last download |
 | `musesh albums [list]` | Download whole albums from a plain-text list |
 | `musesh watch` / `status` | Follow a background download / see where things stand |
+| `musesh library [band]` | Every band, its albums, song counts, sizes, formats and partial albums; `--by size` |
 | `musesh formats [all\|diff]` | File types and quality: summary, every file, or the odd ones out |
 | `musesh clean` | Remove folders (and leftover lyrics) emptied by deleting music |
 | `musesh mp3 [folder]` | Mirror the library as 320 kbps MP3, to a USB drive by default |
@@ -147,6 +148,7 @@ musesh            the CLI: menus, prompts, and every subcommand (stdlib Python)
 library_dl.py     library download: Library.xml -> catalog IDs -> gamdl, batches, resume
 albums.py         album lists: artist-first matching, edition preference, review, download
 formats.py        header-only format scanner with a cache and a pager
+library.py        library tree: bands, albums, counts, sizes, formats, partial albums
 mp3.py            MP3 mirror: plan, convert/redo/copy with progress, verify + prune
 ui.py             shared terminal styling (colors off when piped or NO_COLOR is set)
 library-dl        wrapper that runs library_dl.py with gamdl's Python

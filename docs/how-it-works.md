@@ -1,13 +1,14 @@
 # How it works
 
-There are five scripts behind the one command:
+There are six scripts behind the one command:
 
 1. **`musesh`**: the CLI. Menus, prompts, remembered choices. Standard-library
    Python, so it starts instantly; it hands heavy work to the scripts below.
 2. **`library_dl.py`**: downloads a library from a `Library.xml` export.
 3. **`albums.py`**: resolves and downloads album lists.
 4. **`formats.py`**: the format report.
-5. **`mp3.py`**: the MP3 mirror and `prune`.
+5. **`library.py`**: the library tree (bands, albums, counts, sizes).
+6. **`mp3.py`**: the MP3 mirror and `prune`.
 
 The last four run with the Python inside gamdl's pipx environment, which
 already has gamdl, `httpx` and `mutagen`. Styling is shared through `ui.py`.
@@ -115,6 +116,7 @@ which catches corruption that a correct-looking header would hide.
 | --- | --- |
 | `~/.config/musesh/last-run.json` | Last choices: export, cookies, library folder, MP3 folder, batch size |
 | `~/.cache/musesh/formats.json` | Format scan cache |
+| `~/.cache/musesh/library.json` | Tag cache for `musesh library` |
 | `<library>/.library-dl/matches.json` | Persistent ID to catalog ID (`""` = not in the catalog) |
 | `<library>/.library-dl/done.txt` | Song and album URLs that finished |
 | `<library>/.library-dl/failures.json` | Failure count per URL |

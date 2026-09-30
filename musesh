@@ -27,6 +27,7 @@ from ui import prompt as tty_input  # noqa: E402
 
 FORMATS_SCRIPT = Path(__file__).resolve().parent / "formats.py"
 MP3_SCRIPT = Path(__file__).resolve().parent / "mp3.py"
+LIBRARY_SCRIPT = Path(__file__).resolve().parent / "library.py"
 
 
 HELP_SECTIONS = [
@@ -39,6 +40,7 @@ HELP_SECTIONS = [
     ("Keep an eye on it", [
         ("musesh watch", "follow a download running in the background, live"),
         ("musesh status", "songs downloaded, what's running, what's unmatched"),
+        ("musesh library [band]", "every band, its albums, song counts, sizes, formats; --by size or songs"),
         ("musesh formats [all|diff]", "file types and quality: a summary, every file, or only the odd ones out"),
     ]),
     ("Tidy up and take it with you", [
@@ -608,6 +610,35 @@ def cmd_formats():
     os.execv(str(VENV_PYTHON), [str(VENV_PYTHON), str(FORMATS_SCRIPT), mode, str(folder)])
 
 
+def cmd_library():
+    """musesh library [--by name|size|songs] [folder] [band filter...]"""
+    args, by, folder, words = sys.argv[2:], "name", None, []
+    while args:
+        a = args.pop(0)
+        if a == "--by" and args:
+            by = args.pop(0)
+        elif a.startswith("--by="):
+            by = a.split("=", 1)[1]
+        elif a.startswith(("/", "~", ".")) and clean_path(a).is_dir():
+            folder = clean_path(a)
+        else:
+            words.append(a)
+    if by not in ("name", "size", "songs"):
+        die(f"--by must be name, size or songs, not {by!r}")
+    if folder is None:
+        # After 'musesh prune' the collection lives in the MP3 folder, not the (now thin) library.
+        last = load_last()
+        library = Path(last.get("output", DEFAULT_OUT))
+        folder = library
+        for mp3_dir in filter(None, (last.get("mp3_dir"), library.with_name(library.name + " MP3"))):
+            if (Path(mp3_dir) / ".musesh" / "pruned-originals.txt").exists():
+                folder = Path(mp3_dir)
+                break
+    if not folder.is_dir():
+        die(f"Not a folder: {tilde(folder)}")
+    os.execv(str(VENV_PYTHON), [str(VENV_PYTHON), str(LIBRARY_SCRIPT), str(folder), "--by", by, *words])
+
+
 def cmd_watch():
     """Follow the log of the most recent download (library or albums) live."""
     state = Path(load_last().get("output", str(DEFAULT_OUT))) / ".library-dl"
@@ -624,7 +655,7 @@ def cmd_watch():
 
 COMMANDS = {"download": cmd_download, "continue": cmd_continue, "mp3": cmd_mp3, "status": cmd_status,
             "clean": cmd_clean, "albums": cmd_albums, "watch": cmd_watch, "align": cmd_align,
-            "formats": cmd_formats, "prune": cmd_prune}
+            "formats": cmd_formats, "prune": cmd_prune, "library": cmd_library}
 
 
 def main():

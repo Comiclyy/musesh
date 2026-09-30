@@ -6,7 +6,7 @@ command is safe to stop with **Ctrl-C** and run again; finished work is kept
 and skipped.
 
 - [Download](#download): `musesh`, `continue`, `align`, `albums`
-- [Keep an eye on it](#keep-an-eye-on-it): `watch`, `status`, `formats`
+- [Keep an eye on it](#keep-an-eye-on-it): `watch`, `status`, `library`, `formats`
 - [Tidy up and take it with you](#tidy-up-and-take-it-with-you): `clean`, `mp3`, `prune`
 
 ---
@@ -98,6 +98,43 @@ watching, not the download.
 
 Where the library is, how many songs are downloaded, whether a download is
 running, and how many tracks are unmatched.
+
+### `musesh library [--by name|size|songs] [folder] [band...]`
+
+An overview of the collection as a tree: every band with its number of
+albums, songs and total size, and its albums underneath with their song
+count, size and format.
+
+```text
+  Playboi Carti                      10 albums    123 songs  782 MB           5 partial
+    Die Lit                                     11/19 songs   76 MB  MP3 320  partial
+    Whole Lotta Red                                24 songs  148 MB  MP3 320
+    Whole Lotta Red V1 (Unreleased)                56 songs  359 MB  MP3 128-320 +VBR mixed
+```
+
+| Form | Shows |
+| --- | --- |
+| `musesh library` | Everything, bands A to Z (a leading "The" is ignored) |
+| `musesh library --by size` | Biggest bands first (and biggest albums first within each) |
+| `musesh library --by songs` | Bands with the most songs first |
+| `musesh library sonic` | Only bands whose name contains "sonic" |
+| `musesh library ~/Some/Folder` | Another folder, like the MP3 copy on a USB drive |
+
+- **Names come from the files' tags** (album artist, then artist), so songs
+  in `Compilations/` or with untidy folder names still land under the right
+  band. Untagged files fall back to their folder names. Capitalisation
+  differences ("Nettspend" / "nettspend") are merged.
+- **Partial albums** are flagged when you have fewer songs than the album's
+  track-count tag says, e.g. `11/19 songs  partial`, or `partial, 1/2 discs`
+  when whole discs are missing. Albums without track-count tags (most of your
+  own files) are never flagged.
+- **Format** is one label per album: `AAC 256`, `MP3 320`, `MP3 128-320 mixed`
+  when bitrates differ, and so on.
+- **Default folder:** your library, or the MP3 folder once you've run
+  `musesh prune` into it (that's where the collection lives then).
+
+Tags are cached in `~/.cache/musesh/library.json`; a first run over ~1,500
+songs takes under a second, later runs about a tenth of that.
 
 ### `musesh formats [all|diff] [folder]`
 

@@ -10,8 +10,8 @@ mapped onto a small palette. Re-run after changing output to refresh docs/images
 import argparse
 import html
 import os
+import pty
 import re
-import subprocess
 
 PALETTE = {
     "fg": "#d4d7de", "dim": "#6c7280", "magenta": "#d783e8", "cyan": "#6fc8d6",
@@ -22,10 +22,24 @@ CHAR_W, LINE_H, FONT = 8.1, 19, 13  # CHAR_W leaves headroom for wider fallback 
 
 
 def capture(command, width):
-    env = dict(os.environ, COLUMNS=str(width), TERM="xterm-256color")
-    out = subprocess.run(["script", "-q", "/dev/null", "sh", "-c", command],
-                         capture_output=True, env=env).stdout.decode(errors="replace")
-    out = out.replace("\r", "").replace("\x04\x08\x08", "")
+    """Run command on its own pseudo-terminal (so it prints colors) and collect the output.
+    Unlike `script`, this doesn't depend on stdin, so it works from scripts and pipelines."""
+    pid, fd = pty.fork()
+    if pid == 0:
+        os.environ.update(COLUMNS=str(width), TERM="xterm-256color")
+        os.execvp("sh", ["sh", "-c", command])
+    chunks = []
+    while True:
+        try:
+            data = os.read(fd, 65536)
+        except OSError:  # child closed the terminal
+            break
+        if not data:
+            break
+        chunks.append(data)
+    os.waitpid(pid, 0)
+    out = b"".join(chunks).decode(errors="replace")
+    out = out.replace("\r", "")
     out = re.sub(r"\x1b\[\?[0-9;]*[a-zA-Z]", "", out)  # cursor modes etc.
     return out.rstrip("\n").split("\n")
 
