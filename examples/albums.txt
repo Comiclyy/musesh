@@ -1,0 +1,15 @@
+# Album list for `musesh albums`. One per line:
+#   Artist - Album                  a single album
+#   Artist - *                      every studio album by the artist
+#   Artist - * +eps                 every studio album and EP
+#   https://music.apple.com/...     an exact album (use this if a lookup picks the wrong version)
+# Lines starting with # are ignored. Albums already downloaded are skipped,
+# so you can keep adding to this file and re-run it.
+
+Miles Davis - Kind of Blue
+Stan Getz & João Gilberto - Getz/Gilberto
+
+Nick Drake - Pink Moon
+Big Star - #1 Record
+
+my bloody valentine - * +eps

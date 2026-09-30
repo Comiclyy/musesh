@@ -1,0 +1,3 @@
+#!/bin/sh
+# Runs library_dl.py with the Python from gamdl's pipx environment.
+exec "$HOME/.local/pipx/venvs/gamdl/bin/python" "$(dirname "$0")/library_dl.py" "$@"

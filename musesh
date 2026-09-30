@@ -1,0 +1,646 @@
+#!/usr/bin/env python3
+"""musesh - download and keep up with your Apple Music library. Run 'musesh help' for commands."""
+
+import json
+import os
+import plistlib
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+HOME = Path.home()
+TOOL = Path(__file__).resolve().parent / "library-dl"
+DEFAULT_OUT = HOME / "Music" / "Library Download"
+LAST_RUN = HOME / ".config" / "musesh" / "last-run.json"
+DEFAULT_ALBUM_LIST = HOME / "Documents" / "musesh-albums.txt"
+ALBUMS_SCRIPT = Path(__file__).resolve().parent / "albums.py"
+VENV_PYTHON = HOME / ".local" / "pipx" / "venvs" / "gamdl" / "bin" / "python"  # has gamdl + httpx
+GB = 1024 ** 3
+AUDIO_EXTS = (".m4a", ".mp3", ".flac", ".alac", ".aac", ".wav", ".aiff", ".ogg", ".opus")
+
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from ui import accent, accent_bold, bold, cyan, die, dim, green, heading, note, ok, red, summary, tilde, warn  # noqa: E402
+
+FORMATS_SCRIPT = Path(__file__).resolve().parent / "formats.py"
+MP3_SCRIPT = Path(__file__).resolve().parent / "mp3.py"
+
+
+HELP_SECTIONS = [
+    ("Download", [
+        ("musesh", "download your library from a Library.xml export (asks everything)"),
+        ("musesh continue [N|all]", "next batch with the same choices as last time; N changes the batch size"),
+        ("musesh albums [list]", "download whole albums from a list (default ~/Documents/musesh-albums.txt)"),
+        ("musesh align", "find songs added to Apple Music since the last download and fetch them"),
+    ]),
+    ("Keep an eye on it", [
+        ("musesh watch", "follow a download running in the background, live"),
+        ("musesh status", "songs downloaded, what's running, what's unmatched"),
+        ("musesh formats [all|diff]", "file types and quality: a summary, every file, or only the odd ones out"),
+    ]),
+    ("Tidy up and take it with you", [
+        ("musesh clean", "remove folders (and leftover lyrics) emptied by deleting music"),
+        ("musesh mp3 [folder]", "convert the library to 320 kbps MP3 - a USB drive by default, or any folder"),
+        ("musesh prune [folder]", "after 'mp3': verify every file converted, then delete the non-MP3 originals"),
+    ]),
+]
+
+
+def print_help():
+    print(f"\n  {accent_bold('musesh')}  {dim('-')}  your Apple Music library, as files you own\n")
+    width = max(len(cmd) for _, rows in HELP_SECTIONS for cmd, _ in rows)
+    for title, rows in HELP_SECTIONS:
+        print(f"  {bold(title.upper())}")
+        for cmd, desc in rows:
+            name, _, args = cmd.partition(" ")
+            if name == "musesh" and args:
+                sub, _, rest = args.partition(" ")
+                shown = f"{accent('musesh')} {cyan(sub)}{(' ' + dim(rest)) if rest else ''}"
+            else:
+                shown = accent(cmd)
+            print(f"    {shown}{' ' * (width - len(cmd))}   {desc}")
+        print()
+    last = json.loads(LAST_RUN.read_text()) if LAST_RUN.exists() else {}
+    print(f"  {bold('FILES')}")
+    summary([("library", tilde(last.get("output", DEFAULT_OUT))),
+             ("album list", tilde(DEFAULT_ALBUM_LIST)),
+             ("settings", tilde(LAST_RUN))], indent=4)
+    print(f"\n  {dim('Every command is safe to stop with Ctrl-C and run again; finished work is skipped.')}\n")
+
+
+# ---------------------------------------------------------------------------
+# Prompts and helpers
+# ---------------------------------------------------------------------------
+
+def human(n):
+    return f"{n / GB:.1f} GB"
+
+
+def plural(n, word):
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
+
+def free_space(path):
+    p = Path(path)
+    while not p.exists():
+        p = p.parent
+    return shutil.disk_usage(p).free
+
+
+def count_audio(folder):
+    folder = Path(folder)
+    if not folder.exists():
+        return 0, 0
+    files = [p for p in folder.rglob("*") if p.suffix.lower() in (".m4a", ".mp3") and ".library-dl" not in p.parts]
+    return len(files), sum(p.stat().st_size for p in files)
+
+
+def clean_path(text):
+    """Accept typed or drag-and-dropped paths (quotes, escaped spaces, ~)."""
+    text = text.strip().strip("'\"").replace("\\ ", " ")
+    return Path(text).expanduser()
+
+
+def ask(prompt=""):
+    return input(f"{accent('›')} {prompt}")
+
+
+def pick(title, options, allow_custom=True, custom_prompt="Path"):
+    """options: list of (label, value). Enter picks the first one."""
+    heading(title)
+    for i, (label, _) in enumerate(options, 1):
+        print(f"  {accent(str(i).rjust(2))}  {label}{dim('  (default)') if i == 1 else ''}")
+    if allow_custom:
+        print(f"  {accent(' c')}  {dim('another path - you can drag a file or folder in')}")
+    while True:
+        choice = ask().strip().lower()
+        if not choice and options:
+            return options[0][1]
+        if choice.isdigit() and 1 <= int(choice) <= len(options):
+            return options[int(choice) - 1][1]
+        if allow_custom and choice == "c":
+            return clean_path(ask(f"{custom_prompt}: "))
+        if allow_custom and choice and ("/" in choice or choice.startswith("~")):
+            return clean_path(choice)
+        note("pick a number" + (", 'c', or paste a path" if allow_custom else ""))
+
+
+def confirm(question, default=True):
+    ans = input(f"{accent('?')} {question} {dim('[Y/n]' if default else '[y/N]')} ").strip().lower()
+    return default if not ans else ans.startswith("y")
+
+
+def external_volumes():
+    vols = []
+    for v in sorted(Path("/Volumes").iterdir()):
+        try:
+            if v.resolve() == Path("/") or not os.access(v, os.W_OK):
+                continue
+            vols.append(v)
+        except OSError:
+            continue
+    return vols
+
+
+def newest_first(paths):
+    return sorted(set(paths), key=lambda p: p.stat().st_mtime, reverse=True)
+
+
+def downloaded_count(out):
+    done = Path(out) / ".library-dl" / "done.txt"
+    return len(done.read_text().split()) if done.exists() else 0
+
+
+def download_running():
+    return subprocess.run(["pgrep", "-f", "library_dl.py|albums.py"], capture_output=True).returncode == 0
+
+
+def load_last():
+    return json.loads(LAST_RUN.read_text()) if LAST_RUN.exists() else {}
+
+
+def save_last_run(settings):
+    LAST_RUN.parent.mkdir(parents=True, exist_ok=True)
+    LAST_RUN.write_text(json.dumps(settings, indent=1))
+
+
+def library_exports():
+    return newest_first(
+        p for d in ("Documents", "Desktop", "Downloads", "Music")
+        for p in (HOME / d).glob("*.xml") if "library" in p.name.lower()
+    )
+
+
+def export_label(p, with_time=False):
+    fmt = "%b %d %H:%M" if with_time else "%b %d"
+    return f"{p.name}  {dim(f'{p.parent.name}, exported {time.strftime(fmt, time.localtime(p.stat().st_mtime))}')}"
+
+
+# ---------------------------------------------------------------------------
+# Commands
+# ---------------------------------------------------------------------------
+
+def cmd_download():
+    if download_running():
+        warn("A download is already running. Use 'musesh watch' to follow it.")
+        if not confirm("Start another one anyway?", default=False):
+            return
+
+    xml = pick("Which library export?  (Music > File > Library > Export Library...)",
+               [(export_label(p), p) for p in library_exports()], custom_prompt="Path to Library.xml")
+    if not Path(xml).is_file():
+        die(f"Not found: {xml}")
+
+    cookies = newest_first(
+        p for pattern in ("Music/downloading/cookies*.txt", "Documents/downloading/cookies*.txt",
+                          "Downloads/*cookies*.txt", "Desktop/*cookies*.txt", "cookies.txt")
+        for p in HOME.glob(pattern)
+    )
+    cookie = pick("Which Apple Music cookies file?  (export from music.apple.com while logged in)",
+                  [(tilde(p), p) for p in cookies], custom_prompt="Path to cookies.txt")
+    if not Path(cookie).is_file():
+        die(f"Not found: {cookie}")
+
+    outs = [(f"{tilde(DEFAULT_OUT)}  {dim(human(free_space(DEFAULT_OUT)) + ' free')}", DEFAULT_OUT)]
+    outs += [(f"{v / 'Library Download'}  {dim(human(free_space(v)) + ' free')}", v / "Library Download")
+             for v in external_volumes()]
+    out = Path(pick("Where should the library go?", outs, custom_prompt="Folder"))
+
+    free = free_space(out)
+    if free < 20 * GB:
+        warn(f"Only {human(free)} free there; the full library needs about 18 GB.")
+        if not confirm("Continue anyway?", default=False):
+            return
+
+    done = downloaded_count(out)
+    batch = pick(f"How many songs this run?{f'  ({done} already downloaded)' if done else ''}",
+                 [("200  " + dim("then 'musesh continue' for the next 200"), 200), ("50", 50), ("500", 500),
+                  ("all remaining", 0)], allow_custom=False)
+
+    heading("Ready")
+    summary([("library", tilde(xml)), ("cookies", tilde(cookie)), ("output", tilde(out)),
+             ("songs", batch or "all remaining")])
+    note("Local files are copied as-is; Apple Music tracks download as 256 kbps AAC.")
+    note("Safe to stop with Ctrl-C and run again; finished songs are skipped.")
+    if confirm("Start?"):
+        save_last_run({"xml": str(xml), "cookies": str(cookie), "output": str(out), "batch": batch})
+        run_download(str(xml), str(cookie), str(out), batch)
+
+
+def run_download(xml, cookie, out, batch):
+    args = [str(TOOL), xml, "-c", cookie, "-o", out]
+    if batch:
+        args += ["--batch", str(batch)]
+    os.execv(str(TOOL), args)
+
+
+def cmd_continue():
+    if not LAST_RUN.exists():
+        die("No previous run to continue. Run 'musesh' first.")
+    if download_running():
+        die("A download is already running. Use 'musesh watch' to follow it.")
+    last = load_last()
+    if len(sys.argv) > 2:
+        size = sys.argv[2].lower()
+        if size == "all":
+            last["batch"] = 0
+        elif size.isdigit() and int(size) > 0:
+            last["batch"] = int(size)
+        else:
+            die(f"Batch size must be a number or 'all', not {sys.argv[2]!r}")
+        save_last_run(last)  # the new size sticks for later 'musesh continue' runs
+    for key in ("xml", "cookies"):
+        if not Path(last[key]).is_file():
+            die(f"{tilde(last[key])} no longer exists. Run 'musesh' to pick again.")
+    ok(f"Continuing: next {bold(last['batch'] or 'all remaining')} songs into {tilde(last['output'])}")
+    sys.stdout.flush()
+    run_download(last["xml"], last["cookies"], last["output"], last["batch"])
+
+
+def cmd_mp3():
+    src = Path(pick("Which downloaded library should be converted?",
+                    [(f"{tilde(DEFAULT_OUT)}  {dim(plural(count_audio(DEFAULT_OUT)[0], 'file'))}", DEFAULT_OUT)],
+                    custom_prompt="Folder"))
+    n, size = count_audio(src)
+    if not n:
+        die(f"No audio files found in {tilde(src)}")
+    needed = int(size * 1.3)  # 256 kbps AAC -> 320 kbps MP3 is ~25% bigger
+
+    if len(sys.argv) > 2:  # musesh mp3 <folder>: no questions about where
+        dest = clean_path(sys.argv[2])
+        if not dest.is_absolute():
+            die("Give the destination as a full path, e.g. ~/Music/MP3 or /Volumes/USB/Music")
+    else:
+        local = src.with_name(src.name + " MP3")
+        rescanned = False
+        while True:
+            vols = external_volumes()
+            # A USB drive is the default whenever one is plugged in; otherwise this Mac.
+            options = [(f"{v.name}  {dim('USB drive, ' + human(free_space(v)) + ' free')}", v / "Music") for v in vols]
+            options.append((f"{tilde(local)}  {dim('this Mac, ' + human(free_space(local)) + ' free')}", local))
+            if not vols:
+                warn("Still no USB drive found." if rescanned else
+                     "No USB drive plugged in - converting to this Mac instead, unless you plug one in.")
+                options.append(("Look again for a USB drive  " + dim("plug it in first"), "rescan"))
+            dest = pick(f"Where should the MP3s go?  ({plural(n, 'file')}, about {human(needed)} needed)",
+                        options, custom_prompt="Folder")
+            if dest != "rescan":
+                break
+            rescanned = True
+        dest = Path(dest)
+
+    free = free_space(dest)
+    if free < needed:
+        warn(f"{human(free)} free there, about {human(needed)} needed.")
+        if not confirm("Continue anyway? (it will stop when the drive fills)", default=False):
+            return
+
+    heading("Ready")
+    summary([("from", tilde(src)), ("to", tilde(dest)), ("format", "320 kbps MP3, tags and cover art kept")])
+    note("Files already converted are skipped; anything there in the wrong format is redone or removed.")
+    note("MP3s in your library are copied as they are.")
+    if confirm("Start?"):
+        save_last_run({**load_last(), "mp3_dir": str(dest)})  # so 'musesh prune' knows where the MP3s are
+        sys.stdout.flush()
+        os.execv(str(VENV_PYTHON), [str(VENV_PYTHON), str(MP3_SCRIPT), str(src), str(dest)])
+
+
+def cmd_prune():
+    """Delete non-MP3 originals from the library once every one has a verified MP3 (asks you to type 'delete')."""
+    if download_running():
+        die("A download is running. Wait for it to finish ('musesh watch') before pruning.")
+    last = load_last()
+    src = Path(last.get("output", DEFAULT_OUT))
+    candidates = []
+    if last.get("mp3_dir"):
+        candidates.append(Path(last["mp3_dir"]))
+    candidates += [v / "Music" for v in external_volumes()] + [src.with_name(src.name + " MP3")]
+    candidates = [c for i, c in enumerate(candidates) if c.is_dir() and c not in candidates[:i]]
+    if len(sys.argv) > 2:
+        dest = clean_path(sys.argv[2])
+    elif candidates:
+        dest = Path(pick("Which MP3 folder holds the converted copies?",
+                         [(f"{tilde(c)}  {dim(plural(count_audio(c)[0], 'file'))}", c) for c in candidates],
+                         custom_prompt="Folder"))
+    else:
+        die("No MP3 folder found. Convert first with 'musesh mp3'.")
+    sys.stdout.flush()
+    os.execv(str(VENV_PYTHON), [str(VENV_PYTHON), str(MP3_SCRIPT), "--prune", str(src), str(dest)])
+
+
+def cmd_status():
+    out = Path(load_last().get("output", DEFAULT_OUT))
+    n, size = count_audio(out)
+    unmatched = out / "unmatched.csv"
+    heading("musesh status")
+    rows = [("library", f"{tilde(out)}  {dim(f'{n} files, {human(size)}')}"),
+            ("downloaded", f"{downloaded_count(out)} Apple Music songs and albums"),
+            ("running", green("yes") + dim("  ('musesh watch' to follow)") if download_running() else dim("no"))]
+    if unmatched.exists():
+        rows.append(("unmatched", f"{sum(1 for _ in unmatched.open()) - 1} tracks  {dim(tilde(unmatched))}"))
+    summary(rows)
+    print()
+
+
+def cmd_clean():
+    """Remove folders left empty after deleting music (e.g. in Swinsian or Finder)."""
+    default = Path(load_last().get("output", DEFAULT_OUT))
+    options = [(tilde(default), default)]
+    mp3 = default.with_name(default.name + " MP3")
+    if mp3.exists():
+        options.append((tilde(mp3), mp3))
+    options += [(str(v / "Music"), v / "Music") for v in external_volumes() if (v / "Music").exists()]
+    root = Path(pick("Which music folder should be cleaned up?", options, custom_prompt="Folder"))
+    if not root.is_dir():
+        die(f"Not a folder: {tilde(root)}")
+
+    def skip(p):
+        return ".library-dl" in p.relative_to(root).parts
+
+    # gamdl saves synced lyrics as "<song>.lrc" next to each song. Deleting the song
+    # (in Swinsian or Finder) leaves the .lrc behind, which keeps the folder non-empty.
+    orphans = [l for l in root.rglob("*.lrc")
+               if not skip(l) and not any(l.with_suffix(ext).exists() for ext in AUDIO_EXTS)]
+    orphan_set = set(orphans)
+
+    # Deepest first, so a folder containing only empty folders is caught too.
+    # Finder's .DS_Store files and orphaned lyrics don't count as contents.
+    dirs = sorted((d for d in root.rglob("*") if d.is_dir() and not skip(d)),
+                  key=lambda d: len(d.parts), reverse=True)
+    empty = []
+    for d in dirs:
+        if all(c in empty or c in orphan_set or c.name == ".DS_Store" for c in d.iterdir()):
+            empty.append(d)
+    if not orphans and not empty:
+        ok(f"Nothing to clean up in {tilde(root)}.")
+        return
+
+    heading(f"Clean up {tilde(root)}")
+    if orphans:
+        print(f"  {bold(len(orphans))} lyrics file(s) {dim('(.lrc)')} whose song was deleted")
+    if empty:
+        print(f"  {bold(len(empty))} folder(s) that are empty once those are gone:")
+        for d in sorted(empty)[:40]:
+            print(f"    {dim('-')} {d.relative_to(root)}")
+        if len(empty) > 40:
+            note(f"  ... and {len(empty) - 40} more")
+    if not confirm("Delete them?"):
+        return
+    for l in orphans:
+        l.unlink(missing_ok=True)
+    for d in empty:  # deepest first, so children are gone before their parents
+        (d / ".DS_Store").unlink(missing_ok=True)
+        d.rmdir()
+    ok(f"Removed {len(orphans)} orphaned lyrics file(s) and {len(empty)} empty folder(s).")
+
+
+def cmd_albums():
+    """Download whole albums from a plain-text list. albums.py shows the matches and asks before downloading."""
+    if download_running():
+        die("A download is already running. Use 'musesh watch' to follow it.")
+    if len(sys.argv) > 2:
+        album_list = clean_path(sys.argv[2])
+    else:
+        lists = [DEFAULT_ALBUM_LIST] if DEFAULT_ALBUM_LIST.exists() else []
+        album_list = Path(pick("Which album list?", [(tilde(p), p) for p in lists],
+                               custom_prompt="Path to the album list"))
+    if not album_list.is_file():
+        die(f"Not found: {tilde(album_list)}")
+
+    last = load_last()
+    out = last.get("output", str(DEFAULT_OUT))
+    cookie = last.get("cookies")
+    if not cookie or not Path(cookie).is_file():
+        die("No working cookies file on record. Run 'musesh' once to pick one.")
+    heading("Albums")
+    summary([("list", tilde(album_list)), ("into", tilde(out)), ("cookies", tilde(cookie))])
+    sys.stdout.flush()
+    os.execv(str(VENV_PYTHON), [str(VENV_PYTHON), str(ALBUMS_SCRIPT), str(album_list), "-o", out, "-c", cookie])
+
+
+def load_tracks(xml):
+    with open(xml, "rb") as f:
+        return plistlib.load(f).get("Tracks", {})
+
+
+def describe(t, styled=False):
+    kind = "your file" if t.get("Track Type") == "File" else "Apple Music"
+    album = f" ({t['Album']})" if t.get("Album") else ""
+    if not styled:
+        return f"{t.get('Name', '?')} - {t.get('Artist', 'Unknown Artist')}{album}  [{kind}]"
+    return (f"{bold(t.get('Name', '?'))} {dim('-')} {t.get('Artist', 'Unknown Artist')}"
+            f"{dim(album)}  {cyan(kind) if kind == 'your file' else dim(kind)}")
+
+
+def parse_selection(text, count):
+    """'' -> all; 'none' -> nothing; '1-5,8' -> those numbers (1-based)."""
+    text = text.strip().lower()
+    if not text or text == "all":
+        return list(range(count))
+    if text in ("none", "0"):
+        return []
+    picked = set()
+    for part in text.replace(" ", "").split(","):
+        lo, _, hi = part.partition("-")
+        if not lo.isdigit() or (hi and not hi.isdigit()):
+            raise ValueError(part)
+        for n in range(int(lo), int(hi or lo) + 1):
+            if 1 <= n <= count:
+                picked.add(n - 1)
+    return sorted(picked)
+
+
+def cmd_align():
+    """Find songs added to your Apple Music library since the last download and offer to fetch them.
+
+    "New" means a Persistent ID this folder has never seen: songs you deleted from the
+    download folder (Swinsian, Finder) are still remembered and are never offered again.
+    """
+    if download_running():
+        die("A download is running. Wait for it to finish ('musesh watch'), then run musesh align.")
+    last = load_last()
+    out = Path(last.get("output", str(DEFAULT_OUT)))
+    state = out / ".library-dl"
+    seen_path = state / "seen.json"
+
+    if seen_path.exists():
+        seen = json.loads(seen_path.read_text())
+    else:
+        # First run: everything in the export the library was downloaded from counts as already handled.
+        base = Path(last.get("xml", ""))
+        if not base.is_file() or "align" in base.name:
+            base = Path(pick("Which export was your library downloaded from?  (its songs count as already handled)",
+                             [(export_label(p), p) for p in library_exports()], custom_prompt="Path to Library.xml"))
+        seen = {pid: "baseline" for pid in (t["Persistent ID"] for t in load_tracks(base).values())}
+        state.mkdir(parents=True, exist_ok=True)
+        seen_path.write_text(json.dumps(seen))
+        ok(f"Remembering the {len(seen)} songs in {base.name} as already handled.")
+
+    xml = Path(pick("Which library export has your newest songs?  (Music > File > Library > Export Library...)",
+                    [(export_label(p, with_time=True), p) for p in library_exports()],
+                    custom_prompt="Path to Library.xml"))
+    if not xml.is_file():
+        die(f"Not found: {tilde(xml)}")
+
+    tracks = load_tracks(xml)
+    new = [(tid, t) for tid, t in tracks.items() if t.get("Persistent ID") not in seen]
+    if not new:
+        ok(f"No new songs in {xml.name}.")
+        note("Export a fresh one after adding music to catch the latest.")
+        return
+
+    heading(f"{len(new)} new song(s) since your last download")
+    for i, (_, t) in enumerate(new, 1):
+        print(f"  {accent(str(i).rjust(3))}  {describe(t, styled=True)}")
+    while True:
+        try:
+            chosen = parse_selection(ask(f"Which ones? {dim('[Enter = all, e.g. 1-5,8, or none]')} "), len(new))
+            break
+        except ValueError as bad:
+            note(f"didn't understand {bad}; use numbers like 1-5,8")
+    if not chosen:
+        note("Nothing selected; they'll be offered again next time.")
+        return
+    selected = [new[i] for i in chosen]
+
+    others = [(str(v / "Library Download"), v / "Library Download") for v in external_volumes()]
+    action = pick(
+        f"What should happen with these {len(selected)} song(s)?",
+        [(f"Download into {tilde(out)}", "here"),
+         *[(f"Download into {label}", path) for label, path in others],
+         ("Download into a different folder...", "other"),
+         ("Save the list to a text file and decide later  " + dim("offered again next time"), "save"),
+         ("Skip for now  " + dim("offered again next time"), "skip"),
+         ("Ignore these for good  " + dim("never offered again"), "ignore")],
+        allow_custom=False,
+    )
+    stamp = time.strftime("%Y-%m-%d")
+
+    def remember():
+        for _, t in selected:
+            seen[t["Persistent ID"]] = stamp
+        seen_path.write_text(json.dumps(seen))
+
+    if action == "skip":
+        note("Skipped; they'll be offered again next time.")
+        return
+    if action == "ignore":
+        remember()
+        ok(f"Ignoring {len(selected)} song(s) from now on.")
+        return
+    if action == "save":
+        path = HOME / "Documents" / f"musesh-new-songs-{stamp}.txt"
+        path.write_text("".join(f"{describe(t)}\n" for _, t in selected))
+        ok(f"Saved to {tilde(path)}.")
+        note("They'll be offered again next time you run musesh align.")
+        return
+
+    if action == "here":
+        dest = out
+    elif action == "other":
+        while True:
+            dest = clean_path(ask(f"Folder {dim('(e.g. ~/Music/New, or drag one in)')}: "))
+            if dest.is_absolute():
+                break
+            note("give a full path starting with ~ or /")
+    else:
+        dest = Path(action)
+    cookie = last.get("cookies")
+    if not cookie or not Path(cookie).is_file():
+        die("No working cookies file on record. Run 'musesh' once to pick one.")
+
+    # Two or more new Apple Music songs from the same album: offer the whole album, once per album.
+    groups = {}
+    for tid, t in selected:
+        album = t.get("Album")
+        if t.get("Track Type") == "File" or not album or album.endswith(" - Single"):
+            continue
+        groups.setdefault((t.get("Album Artist") or t.get("Artist") or "", album), []).append(tid)
+    whole_albums, covered = [], set()
+    for (artist, album), tids in groups.items():
+        if len(tids) >= 2 and confirm(f"{len(tids)} new songs are from {bold(album)} by {artist}. "
+                                      "Download the whole album?", default=False):
+            whole_albums.append(f"{artist} - {album}")
+            covered.update(tids)
+    songs = [(tid, t) for tid, t in selected if tid not in covered]
+
+    stamp_run = time.strftime("%Y%m%d-%H%M%S")
+    state.mkdir(parents=True, exist_ok=True)
+    success = True
+    if songs:
+        # A mini export with just the chosen songs, so the downloader never touches anything
+        # else (it would otherwise re-copy local files you deleted on purpose).
+        mini = state / f"align-{stamp_run}.xml"
+        with open(mini, "wb") as f:
+            plistlib.dump({"Tracks": {tid: t for tid, t in songs}}, f)
+        # `musesh continue` resumes this set if it gets interrupted.
+        save_last_run({**last, "xml": str(mini), "output": str(dest), "batch": 0})
+        heading(f"Downloading {len(songs)} song(s) into {tilde(dest)}")
+        sys.stdout.flush()
+        success = subprocess.run([str(TOOL), str(mini), "-c", cookie, "-o", str(dest)]).returncode == 0
+    if whole_albums:
+        album_list = state / f"align-{stamp_run}-albums.txt"
+        album_list.write_text("\n".join(whole_albums) + "\n")
+        heading(f"Downloading {len(whole_albums)} whole album(s) into {tilde(dest)}")
+        sys.stdout.flush()
+        success = subprocess.run([str(VENV_PYTHON), str(ALBUMS_SCRIPT), str(album_list),
+                                  "-o", str(dest), "-c", cookie, "-y"]).returncode == 0 and success
+    print()
+    if success:
+        # Only now count them as handled; a failed or interrupted run offers them again next time
+        # (anything that did finish is skipped by the downloader either way).
+        remember()
+        ok(f"Done. These {len(selected)} song(s) won't be offered again.")
+    else:
+        warn("The download didn't finish; run musesh align (or musesh continue) again to pick these up.")
+
+
+def cmd_formats():
+    """musesh formats [all|diff] [folder]: audio format report (default folder: your library)."""
+    args = sys.argv[2:]
+    mode = args.pop(0) if args and args[0] in ("summary", "all", "diff") else "summary"
+    folder = clean_path(args[0]) if args else Path(load_last().get("output", DEFAULT_OUT))
+    if not folder.is_dir():
+        die(f"Not a folder: {tilde(folder)}")
+    os.execv(str(VENV_PYTHON), [str(VENV_PYTHON), str(FORMATS_SCRIPT), mode, str(folder)])
+
+
+def cmd_watch():
+    """Follow the log of the most recent download (library or albums) live."""
+    state = Path(load_last().get("output", str(DEFAULT_OUT))) / ".library-dl"
+    logs = [p for p in (state / "albums-run.log", state / "run.log") if p.exists()]
+    if not logs:
+        die(f"No download log found in {tilde(state)}. Downloads started from your own terminal print there instead.")
+    log = max(logs, key=lambda p: p.stat().st_mtime)
+    heading(f"Watching {tilde(log)}")
+    note(("a download is running" if download_running() else "no download running right now")
+         + "  -  Ctrl-C stops watching, not the download")
+    print(flush=True)
+    os.execvp("tail", ["tail", "-n", "40", "-F", str(log)])
+
+
+COMMANDS = {"download": cmd_download, "continue": cmd_continue, "mp3": cmd_mp3, "status": cmd_status,
+            "clean": cmd_clean, "albums": cmd_albums, "watch": cmd_watch, "align": cmd_align,
+            "formats": cmd_formats, "prune": cmd_prune}
+
+
+def main():
+    arg = sys.argv[1] if len(sys.argv) > 1 else "download"
+    if arg in ("-h", "--help", "help"):
+        print_help()
+        return
+    if arg not in COMMANDS:
+        print(f"{red('✗')} Unknown command {arg!r}", file=sys.stderr, flush=True)
+        print_help()
+        sys.exit(1)
+    try:
+        COMMANDS[arg]()
+    except (KeyboardInterrupt, EOFError):
+        print()
+        note("stopped")
+
+
+if __name__ == "__main__":
+    main()

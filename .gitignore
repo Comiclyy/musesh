@@ -1,0 +1,17 @@
+# Claude Code
+.claude/
+
+# Personal notes and lists
+toget.md
+musesh-albums.txt
+*cookies*.txt
+
+# Python
+__pycache__/
+*.pyc
+
+# Local test sandboxes
+.test/
+
+# macOS
+.DS_Store
