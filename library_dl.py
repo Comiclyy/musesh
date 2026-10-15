@@ -35,7 +35,24 @@ structlog.configure(wrapper_class=structlog.make_filtering_bound_logger(logging.
 
 DURATION_TOLERANCE_MS = 3000
 SEARCH_CONCURRENCY = 1
-STATE_DIR = ".library-dl"
+STATE_DIR = ".musesh"          # hidden tracking folder inside each music folder
+LEGACY_STATE_DIR = ".library-dl"  # its old name
+DEFAULT_INCOMING = Path("~/Music/musesh/Incoming").expanduser()
+
+
+def state_dir_for(folder):
+    """The tracking folder for a music folder, moving an old '.library-dl' over if needed."""
+    state, legacy = folder / STATE_DIR, folder / LEGACY_STATE_DIR
+    if legacy.is_dir():
+        state.mkdir(parents=True, exist_ok=True)
+        for item in legacy.iterdir():
+            target = state / item.name
+            if not target.exists():
+                item.rename(target)
+        if not any(legacy.iterdir()):
+            legacy.rmdir()
+    state.mkdir(parents=True, exist_ok=True)
+    return state
 
 
 def norm(s):
@@ -449,14 +466,14 @@ async def login(cookies):
 async def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("xml", type=Path, nargs="?", help="Library.xml exported from Music (File > Library > Export Library...)")
-    p.add_argument("-o", "--output", type=Path, default=Path("~/Music/Library Download").expanduser(),
-                   help="output folder (default: ~/Music/Library Download)")
+    p.add_argument("-o", "--output", type=Path, default=DEFAULT_INCOMING,
+                   help="output folder (default: ~/Music/musesh/Incoming)")
     p.add_argument("-c", "--cookies", type=Path, default=Path("cookies.txt"),
                    help="Netscape cookies.txt exported from music.apple.com while logged in")
     p.add_argument("--mp3", action="store_true",
-                   help="also convert everything to 320 kbps MP3 in '<output> MP3'")
+                   help="also convert everything to 320 kbps MP3 (default: the Library folder next to the output)")
     p.add_argument("--mp3-dir", type=Path,
-                   help="where to write MP3s (default: '<output> MP3'), e.g. a USB stick")
+                   help="where to write MP3s (default: <output>/../Library), e.g. a USB stick")
     p.add_argument("--convert-only", action="store_true",
                    help="skip copying/downloading and just convert the output folder to MP3")
     p.add_argument("--jobs", type=int, default=os.cpu_count() or 4, help="parallel MP3 conversions")
@@ -465,21 +482,22 @@ async def main():
     p.add_argument("-b", "--batch", type=int,
                    help="only download the next N songs this run (re-run for the next batch)")
     p.add_argument("--limit", type=int, help="only process the first N Apple Music tracks (for testing)")
+    p.add_argument("--unmatched", type=Path,
+                   help="where to write the list of tracks not found (default: <output>/unmatched.csv)")
     p.epilog = "Arguments after '--' are passed to gamdl, e.g. -- --song-codec-priority alac"
     argv = sys.argv[1:]
     gamdl_args = argv[argv.index("--") + 1:] if "--" in argv else []
     args = p.parse_args(argv[: argv.index("--")] if "--" in argv else argv)
 
     out_dir = args.output.expanduser().resolve()
-    mp3_dir = args.mp3_dir.expanduser().resolve() if args.mp3_dir else out_dir.with_name(out_dir.name + " MP3")
+    mp3_dir = args.mp3_dir.expanduser().resolve() if args.mp3_dir else out_dir.parent / "Library"
     if args.convert_only:
         convert_to_mp3(out_dir, mp3_dir, args.jobs)
         return
 
     if not args.xml:
         p.error("the Library.xml path is required unless --convert-only is used")
-    state_dir = out_dir / STATE_DIR
-    state_dir.mkdir(parents=True, exist_ok=True)
+    state_dir = state_dir_for(out_dir)
     cookies = args.cookies.expanduser().resolve()
     if not cookies.exists():
         sys.exit(f"Cookies file not found: {cookies}")
@@ -529,7 +547,7 @@ async def main():
             log(f"Downloading {len(batch)} songs found by search")
             run_gamdl(batch, state_dir, cookies, out_dir, gamdl_args, progress)
 
-    write_unmatched(matches.split(remote)[1], out_dir / "unmatched.csv")
+    write_unmatched(matches.split(remote)[1], (args.unmatched or out_dir / "unmatched.csv").expanduser())
     if summary() and args.batch:
         log("Run again for the next batch.")
 

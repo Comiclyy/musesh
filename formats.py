@@ -79,7 +79,7 @@ def probe_many(paths):
 def scan(root):
     """Probe every audio file under root, reusing cached results for unchanged files."""
     files = sorted(p for p in root.rglob("*")
-                   if p.suffix.lower() in AUDIO_EXTS and ".library-dl" not in p.parts and p.is_file())
+                   if p.suffix.lower() in AUDIO_EXTS and not {".musesh", ".library-dl"} & set(p.parts) and p.is_file())
     try:
         cache = json.loads(CACHE.read_text())
     except (OSError, ValueError):

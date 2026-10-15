@@ -1,6 +1,6 @@
 # How it works
 
-There are six scripts behind the one command:
+The CLI delegates to a small set of helpers:
 
 1. **`musesh`**: the CLI. Menus, prompts, remembered choices. Standard-library
    Python, so it starts instantly; it hands heavy work to the scripts below.
@@ -9,9 +9,13 @@ There are six scripts behind the one command:
 4. **`formats.py`**: the format report.
 5. **`library.py`**: the library tree (bands, albums, counts, sizes).
 6. **`mp3.py`**: the MP3 mirror and `prune`.
+7. **`apple_music.py`**: direct Apple Music song and album links.
+8. **`soundcloud.py`**: public SoundCloud track and album/set links.
 
-The last four run with the Python inside gamdl's pipx environment, which
-already has gamdl, `httpx` and `mutagen`. Styling is shared through `ui.py`.
+The Apple Music, format, library and MP3 helpers run with the Python inside
+gamdl's pipx environment, which has gamdl, `httpx` and `mutagen`. SoundCloud
+uses standard-library Python and a separate yt-dlp executable, preferring
+Homebrew over PATH. Styling is shared through `ui.py`.
 
 ```mermaid
 flowchart LR
@@ -19,15 +23,23 @@ flowchart LR
   C[cookies.txt] --> M
   M --> L[library_dl.py]
   M --> A[albums.py]
+  AM[Apple Music link] --> M
+  SC[SoundCloud link] --> M
+  M --> AMH[apple_music.py]
+  M --> SCH[soundcloud.py]
   M --> F[formats.py]
   M --> P[mp3.py]
   L -- catalog IDs --> G[gamdl]
   A -- album URLs --> G
+  AMH -- song IDs --> G
+  SCH --> Y[yt-dlp]
   G --> D[(Artist/Album/*.m4a)]
+  Y -- native audio --> N[(Artist/Album/audio files)]
   L -- copies your own files --> D
   F -- reads headers --> D
   P -- ffmpeg --> U[(MP3 folder / USB)]
   D --> P
+  N --> P
 ```
 
 ## Matching songs to Apple Music
@@ -53,7 +65,7 @@ If a song's ID turns out to be dead (Apple answers 404, usually because the
 album was re-released under a new ID), the ID is recorded in `gone.txt` and the
 song is searched again, instead of counting as a failure.
 
-## Batches, resuming and failures
+## Apple Music library batches, resuming and failures
 
 - Finished songs are appended to `done.txt` as they complete, so any run can
   be stopped and resumed.
@@ -91,6 +103,35 @@ then the one with the fewest tracks.
 leaves out live albums, compilations and box sets. `+eps` adds EPs from the
 **Singles & EPs** section.
 
+## Direct Apple Music links
+
+Direct Apple Music links (`apple` / `am`) use `apple_music.py` in gamdl's Python
+environment. Song links are normalized to catalog IDs; album links expand to
+individual songs through the authenticated catalog API, including paginated
+track lists. They share `done.txt` with library downloads, and record an album
+as complete only when all of its songs have finished. Their native audio is
+downloaded through the same gamdl runner as the Library.xml workflow.
+
+## SoundCloud links
+
+SoundCloud runs through the independent standard-library `soundcloud.py`
+helper and the `yt-dlp` executable (Homebrew first, then PATH). It stages downloads and metadata
+processing inside `Incoming/.musesh/soundcloud-work/`, verifies an audio stream
+with ffprobe, then publishes the finished file without overwriting existing
+music. Completion is recorded by SoundCloud track ID, separately from Apple
+Music, only after publication succeeds. Preview formats are excluded.
+
+Optional cookies are passed to both metadata lookup and downloading. Browser
+cookies are read locally; file exports are copied into a private temporary
+directory and removed after the command, leaving the export unchanged.
+Neither cookie contents nor SoundCloud login preferences enter settings.
+Unfinished work stays under `.musesh/soundcloud-work/` for retries; the
+working directory is private because metadata can include signed media URLs.
+
+Each successful track ID is kept in `soundcloud-done.json`, even after its
+file is deleted. Repeating a link resumes unfinished tracks and skips completed
+ones across sets. There is no automatic SoundCloud feed or profile sync.
+
 ## Formats
 
 `formats.py` reads only each file's header with `mutagen` (under a
@@ -114,15 +155,19 @@ which catches corruption that a correct-looking header would hide.
 
 | Path | Holds |
 | --- | --- |
-| `~/.config/musesh/last-run.json` | Last choices: export, cookies, library folder, MP3 folder, batch size |
+| `~/.config/musesh/settings.json` | Saved choices: export, cookies, Incoming and Library folders, batch size |
 | `~/.cache/musesh/formats.json` | Format scan cache |
 | `~/.cache/musesh/library.json` | Tag cache for `musesh library` |
-| `<library>/.library-dl/matches.json` | Persistent ID to catalog ID (`""` = not in the catalog) |
-| `<library>/.library-dl/done.txt` | Song and album URLs that finished |
-| `<library>/.library-dl/failures.json` | Failure count per URL |
-| `<library>/.library-dl/gone.txt` | Catalog IDs Apple answers with 404 |
-| `<library>/.library-dl/seen.json` | Every Persistent ID `align` has seen |
-| `<library>/.library-dl/albums.json` | Cached album-list lookups |
-| `<library>/.library-dl/*.log` | Logs of background runs (`musesh watch` follows these) |
-| `<library>/unmatched.csv` | Tracks that couldn't be found on Apple Music |
-| `<mp3 folder>/.musesh/pruned-originals.txt` | MP3s whose original was pruned |
+| `Incoming/.musesh/matches.json` | Persistent ID to catalog ID (`""` = not in the catalog) |
+| `Incoming/.musesh/done.txt` | Song and album URLs that finished |
+| `Incoming/.musesh/failures.json` | Failure count per URL |
+| `Incoming/.musesh/gone.txt` | Catalog IDs Apple answers with 404 |
+| `Incoming/.musesh/seen.json` | Every Persistent ID `align` has seen |
+| `Incoming/.musesh/albums.json` | Cached album-list lookups |
+| `Incoming/.musesh/*.log` | Logs of background runs (`musesh watch` follows these) |
+| `Incoming/.musesh/apple-run.log` | Direct Apple Music link progress (`musesh watch` follows this too) |
+| `Incoming/.musesh/soundcloud-done.json` | Finished SoundCloud track IDs and relative file paths, retained after deletion |
+| `Incoming/.musesh/soundcloud-run.log` | SoundCloud progress and errors (`musesh watch` follows this too) |
+| `Incoming/.musesh/soundcloud-work/` | Staged and interrupted SoundCloud downloads, excluded from library scans |
+| `~/Music/musesh/unmatched.csv` | Tracks that couldn't be found on Apple Music |
+| `Library/.musesh/pruned-originals.txt` | MP3s whose original was pruned |

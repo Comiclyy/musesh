@@ -12,9 +12,21 @@ from pathlib import Path
 
 HOME = Path.home()
 TOOL = Path(__file__).resolve().parent / "library-dl"
-DEFAULT_OUT = HOME / "Music" / "Library Download"
-LAST_RUN = HOME / ".config" / "musesh" / "last-run.json"
-DEFAULT_ALBUM_LIST = HOME / "Documents" / "musesh-albums.txt"
+# Everything musesh owns lives in one folder:
+ROOT = HOME / "Music" / "musesh"
+LIBRARY = ROOT / "Library"        # the collection (MP3s once converted)
+INCOMING = ROOT / "Incoming"      # new downloads, waiting for 'musesh mp3'
+DEFAULT_OUT = INCOMING
+DEFAULT_ALBUM_LIST = ROOT / "albums.txt"
+UNMATCHED = ROOT / "unmatched.csv"
+STATE = ".musesh"                 # hidden tracking folder inside each music folder
+TRACKING = {".musesh", ".library-dl"}  # ...and its old name
+SETTINGS = HOME / ".config" / "musesh" / "settings.json"
+OLD_SETTINGS = HOME / ".config" / "musesh" / "last-run.json"
+LAST_RUN = SETTINGS
+# The layout before 'musesh migrate'
+OLD_INCOMING = HOME / "Music" / "Library Download"
+OLD_LIBRARY = HOME / "Music" / "Library Download MP3"
 ALBUMS_SCRIPT = Path(__file__).resolve().parent / "albums.py"
 VENV_PYTHON = HOME / ".local" / "pipx" / "venvs" / "gamdl" / "bin" / "python"  # has gamdl + httpx
 GB = 1024 ** 3
@@ -34,7 +46,9 @@ HELP_SECTIONS = [
     ("Download", [
         ("musesh", "download your library from a Library.xml export (asks everything)"),
         ("musesh continue [N|all]", "next batch with the same choices as last time; N changes the batch size"),
-        ("musesh albums [list]", "download whole albums from a list (default ~/Documents/musesh-albums.txt)"),
+        ("musesh albums [list]", "download whole albums from a list (default ~/Music/musesh/albums.txt)"),
+        ("musesh soundcloud [URL]", "download a public SoundCloud track or album/set (alias: sc)"),
+        ("musesh apple [URL]", "download an Apple Music song or album link (alias: am)"),
         ("musesh align", "find songs added to Apple Music since the last download and fetch them"),
     ]),
     ("Keep an eye on it", [
@@ -45,8 +59,9 @@ HELP_SECTIONS = [
     ]),
     ("Tidy up and take it with you", [
         ("musesh clean", "remove folders (and leftover lyrics) emptied by deleting music"),
-        ("musesh mp3 [folder]", "convert the library to 320 kbps MP3 - a USB drive by default, or any folder"),
-        ("musesh prune [folder]", "after 'mp3': verify every file converted, then delete the non-MP3 originals"),
+        ("musesh mp3 [folder]", "convert Incoming into the Library as 320 kbps MP3, or onto a USB drive"),
+        ("musesh prune [folder]", "after 'mp3': verify every file converted, then delete the originals"),
+        ("musesh migrate", "move folders from the old layout into ~/Music/musesh (once)"),
     ]),
 ]
 
@@ -65,11 +80,12 @@ def print_help():
                 shown = accent(cmd)
             print(f"    {shown}{' ' * (width - len(cmd))}   {desc}")
         print()
-    last = json.loads(LAST_RUN.read_text()) if LAST_RUN.exists() else {}
-    print(f"  {bold('FILES')}")
-    summary([("library", tilde(last.get("output", DEFAULT_OUT))),
-             ("album list", tilde(DEFAULT_ALBUM_LIST)),
-             ("settings", tilde(LAST_RUN))], indent=4)
+    print(f"  {bold('FILES')}  {dim(tilde(ROOT))}")
+    summary([("Library/", "your collection"),
+             ("Incoming/", "new downloads, waiting for 'musesh mp3'"),
+             ("albums.txt", "your album list"),
+             ("unmatched.csv", "tracks not found on Apple Music"),
+             ("settings", tilde(SETTINGS))], indent=4)
     print(f"\n  {dim('Every command is safe to stop with Ctrl-C and run again; finished work is skipped.')}\n")
 
 
@@ -96,7 +112,7 @@ def count_audio(folder):
     folder = Path(folder)
     if not folder.exists():
         return 0, 0
-    files = [p for p in folder.rglob("*") if p.suffix.lower() in (".m4a", ".mp3") and ".library-dl" not in p.parts]
+    files = [p for p in folder.rglob("*") if p.suffix.lower() in (".m4a", ".mp3") and not TRACKING & set(p.parts)]
     return len(files), sum(p.stat().st_size for p in files)
 
 
@@ -152,21 +168,36 @@ def newest_first(paths):
 
 
 def downloaded_count(out):
-    done = Path(out) / ".library-dl" / "done.txt"
+    done = next((Path(out) / d / "done.txt" for d in (STATE, ".library-dl") if (Path(out) / d / "done.txt").exists()),
+                Path(out) / STATE / "done.txt")
     return len(done.read_text().split()) if done.exists() else 0
 
 
 def download_running():
-    return subprocess.run(["pgrep", "-f", "library_dl.py|albums.py"], capture_output=True).returncode == 0
+    return subprocess.run(["pgrep", "-f", "library_dl.py|albums.py|soundcloud.py|apple_music.py"], capture_output=True).returncode == 0
 
 
 def load_last():
-    return json.loads(LAST_RUN.read_text()) if LAST_RUN.exists() else {}
+    for path in (SETTINGS, OLD_SETTINGS):
+        if path.exists():
+            return json.loads(path.read_text())
+    return {}
 
 
 def save_last_run(settings):
-    LAST_RUN.parent.mkdir(parents=True, exist_ok=True)
-    LAST_RUN.write_text(json.dumps(settings, indent=1))
+    SETTINGS.parent.mkdir(parents=True, exist_ok=True)
+    SETTINGS.write_text(json.dumps(settings, indent=1))
+    OLD_SETTINGS.unlink(missing_ok=True)  # replaced by settings.json
+
+
+def collection():
+    """Where the collection is: the Library folder once it has music, else the download folder."""
+    if count_audio(LIBRARY)[0]:
+        return LIBRARY
+    last = load_last()
+    if last.get("mp3_dir") and count_audio(Path(last["mp3_dir"]))[0]:
+        return Path(last["mp3_dir"])
+    return Path(last.get("output", DEFAULT_OUT))
 
 
 def library_exports():
@@ -207,7 +238,7 @@ def cmd_download():
         die(f"Not found: {cookie}")
 
     outs = [(f"{tilde(DEFAULT_OUT)}  {dim(human(free_space(DEFAULT_OUT)) + ' free')}", DEFAULT_OUT)]
-    outs += [(f"{v / 'Library Download'}  {dim(human(free_space(v)) + ' free')}", v / "Library Download")
+    outs += [(f"{v / 'musesh' / 'Incoming'}  {dim(human(free_space(v)) + ' free')}", v / "musesh" / "Incoming")
              for v in external_volumes()]
     out = Path(pick("Where should the library go?", outs, custom_prompt="Folder"))
 
@@ -234,13 +265,15 @@ def cmd_download():
 
 def run_download(xml, cookie, out, batch):
     args = [str(TOOL), xml, "-c", cookie, "-o", out]
+    if Path(out) == INCOMING:
+        args += ["--unmatched", str(UNMATCHED)]  # next to the music, not inside Incoming
     if batch:
         args += ["--batch", str(batch)]
     os.execv(str(TOOL), args)
 
 
 def cmd_continue():
-    if not LAST_RUN.exists():
+    if not load_last():
         die("No previous run to continue. Run 'musesh' first.")
     if download_running():
         die("A download is already running. Use 'musesh watch' to follow it.")
@@ -276,7 +309,7 @@ def cmd_mp3():
         if not dest.is_absolute():
             die("Give the destination as a full path, e.g. ~/Music/MP3 or /Volumes/USB/Music")
     else:
-        local = src.with_name(src.name + " MP3")
+        local = LIBRARY if src == INCOMING else src.with_name(src.name + " MP3")
         rescanned = False
         while True:
             vols = external_volumes()
@@ -319,7 +352,7 @@ def cmd_prune():
     candidates = []
     if last.get("mp3_dir"):
         candidates.append(Path(last["mp3_dir"]))
-    candidates += [v / "Music" for v in external_volumes()] + [src.with_name(src.name + " MP3")]
+    candidates += [LIBRARY] + [v / "Music" for v in external_volumes()]
     candidates = [c for i, c in enumerate(candidates) if c.is_dir() and c not in candidates[:i]]
     if len(sys.argv) > 2:
         dest = clean_path(sys.argv[2])
@@ -335,12 +368,20 @@ def cmd_prune():
 
 def cmd_status():
     out = Path(load_last().get("output", DEFAULT_OUT))
-    n, size = count_audio(out)
-    unmatched = out / "unmatched.csv"
+    lib = collection()
+    unmatched = UNMATCHED if UNMATCHED.exists() else out / "unmatched.csv"
     heading("musesh status")
-    rows = [("library", f"{tilde(out)}  {dim(f'{n} files, {human(size)}')}"),
-            ("downloaded", f"{downloaded_count(out)} Apple Music songs and albums"),
+    rows = []
+    for label, folder in (("library", lib), ("incoming", out)):
+        if label == "incoming" and folder == lib:
+            continue
+        n, size = count_audio(folder)
+        rows.append((label, f"{tilde(folder)}  {dim(f'{n} files, {human(size)}')}"))
+    rows += [("downloaded", f"{downloaded_count(out)} Apple Music songs and albums"),
             ("running", green("yes") + dim("  ('musesh watch' to follow)") if download_running() else dim("no"))]
+    sc_done = out / STATE / "soundcloud-done.json"
+    if sc_done.exists():
+        rows.append(("SoundCloud", f"{len(json.loads(sc_done.read_text()))} tracks handled"))
     if unmatched.exists():
         rows.append(("unmatched", f"{sum(1 for _ in unmatched.open()) - 1} tracks  {dim(tilde(unmatched))}"))
     summary(rows)
@@ -349,18 +390,15 @@ def cmd_status():
 
 def cmd_clean():
     """Remove folders left empty after deleting music (e.g. in Swinsian or Finder)."""
-    default = Path(load_last().get("output", DEFAULT_OUT))
-    options = [(tilde(default), default)]
-    mp3 = default.with_name(default.name + " MP3")
-    if mp3.exists():
-        options.append((tilde(mp3), mp3))
+    incoming = Path(load_last().get("output", DEFAULT_OUT))
+    options = [(tilde(f), f) for f in dict.fromkeys((collection(), incoming)) if f.is_dir()]
     options += [(str(v / "Music"), v / "Music") for v in external_volumes() if (v / "Music").exists()]
     root = Path(pick("Which music folder should be cleaned up?", options, custom_prompt="Folder"))
     if not root.is_dir():
         die(f"Not a folder: {tilde(root)}")
 
     def skip(p):
-        return ".library-dl" in p.relative_to(root).parts
+        return bool(TRACKING & set(p.relative_to(root).parts))
 
     # gamdl saves synced lyrics as "<song>.lrc" next to each song. Deleting the song
     # (in Swinsian or Finder) leaves the .lrc behind, which keeps the folder non-empty.
@@ -397,6 +435,42 @@ def cmd_clean():
         (d / ".DS_Store").unlink(missing_ok=True)
         d.rmdir()
     ok(f"Removed {len(orphans)} orphaned lyrics file(s) and {len(empty)} empty folder(s).")
+
+
+def cmd_apple():
+    """Download direct links using existing Apple Music settings and state."""
+    args = sys.argv[2:]
+    help_requested = any(a in ("-h", "--help") for a in args)
+    if not help_requested and download_running():
+        die("A download is already running. Use 'musesh watch' to follow it.")
+    if not VENV_PYTHON.is_file():
+        die("gamdl's Python environment wasn't found. Install it with: pipx install gamdl")
+    last = load_last()
+    defaults = ["--output", str(last.get("output", DEFAULT_OUT))]
+    if not any(a.startswith("-c") or a.startswith("--cookies") for a in args):
+        cookie = last.get("cookies")
+        if not cookie or not Path(cookie).is_file():
+            candidates = newest_first((HOME / "Downloads").glob("*apple*cookie*.txt"))
+            cookie = str(candidates[0]) if candidates else None
+        if cookie:
+            defaults += ["--cookies", str(cookie)]
+    script = Path(__file__).resolve().parent / "apple_music.py"
+    sys.stdout.flush()
+    os.execv(str(VENV_PYTHON), [str(VENV_PYTHON), str(script), *defaults, *args])
+
+
+def cmd_soundcloud():
+    """SoundCloud needs neither gamdl's Python nor Apple Music credentials."""
+    if not any(a in ("-h", "--help") for a in sys.argv[2:]) and download_running():
+        die("A download is already running. Use 'musesh watch' to follow it.")
+    args = sys.argv[2:]
+    if not any(a in ("-h", "--help") for a in args):
+        if any(a == "-o" or a == "--output" or a.startswith("--output=") for a in args):
+            die("SoundCloud uses your saved Incoming folder; pick it with 'musesh' or omit the output flag.")
+    out = str(load_last().get("output", DEFAULT_OUT))
+    script = Path(__file__).resolve().parent / "soundcloud.py"
+    sys.stdout.flush()
+    os.execv(sys.executable, [sys.executable, str(script), "--output", out, *args])
 
 
 def cmd_albums():
@@ -465,7 +539,7 @@ def cmd_align():
         die("A download is running. Wait for it to finish ('musesh watch'), then run musesh align.")
     last = load_last()
     out = Path(last.get("output", str(DEFAULT_OUT)))
-    state = out / ".library-dl"
+    state = out / STATE
     seen_path = state / "seen.json"
 
     if seen_path.exists():
@@ -508,7 +582,7 @@ def cmd_align():
         return
     selected = [new[i] for i in chosen]
 
-    others = [(str(v / "Library Download"), v / "Library Download") for v in external_volumes()]
+    others = [(str(v / "musesh" / "Incoming"), v / "musesh" / "Incoming") for v in external_volumes()]
     action = pick(
         f"What should happen with these {len(selected)} song(s)?",
         [(f"Download into {tilde(out)}", "here"),
@@ -534,7 +608,7 @@ def cmd_align():
         ok(f"Ignoring {len(selected)} song(s) from now on.")
         return
     if action == "save":
-        path = HOME / "Documents" / f"musesh-new-songs-{stamp}.txt"
+        path = ROOT / f"new-songs-{stamp}.txt"
         path.write_text("".join(f"{describe(t)}\n" for _, t in selected))
         ok(f"Saved to {tilde(path)}.")
         note("They'll be offered again next time you run musesh align.")
@@ -604,7 +678,7 @@ def cmd_formats():
     """musesh formats [all|diff] [folder]: audio format report (default folder: your library)."""
     args = sys.argv[2:]
     mode = args.pop(0) if args and args[0] in ("summary", "all", "diff") else "summary"
-    folder = clean_path(args[0]) if args else Path(load_last().get("output", DEFAULT_OUT))
+    folder = clean_path(args[0]) if args else collection()
     if not folder.is_dir():
         die(f"Not a folder: {tilde(folder)}")
     os.execv(str(VENV_PYTHON), [str(VENV_PYTHON), str(FORMATS_SCRIPT), mode, str(folder)])
@@ -626,14 +700,7 @@ def cmd_library():
     if by not in ("name", "size", "songs"):
         die(f"--by must be name, size or songs, not {by!r}")
     if folder is None:
-        # After 'musesh prune' the collection lives in the MP3 folder, not the (now thin) library.
-        last = load_last()
-        library = Path(last.get("output", DEFAULT_OUT))
-        folder = library
-        for mp3_dir in filter(None, (last.get("mp3_dir"), library.with_name(library.name + " MP3"))):
-            if (Path(mp3_dir) / ".musesh" / "pruned-originals.txt").exists():
-                folder = Path(mp3_dir)
-                break
+        folder = collection()
     if not folder.is_dir():
         die(f"Not a folder: {tilde(folder)}")
     os.execv(str(VENV_PYTHON), [str(VENV_PYTHON), str(LIBRARY_SCRIPT), str(folder), "--by", by, *words])
@@ -641,8 +708,8 @@ def cmd_library():
 
 def cmd_watch():
     """Follow the log of the most recent download (library or albums) live."""
-    state = Path(load_last().get("output", str(DEFAULT_OUT))) / ".library-dl"
-    logs = [p for p in (state / "albums-run.log", state / "run.log") if p.exists()]
+    state = Path(load_last().get("output", str(DEFAULT_OUT))) / STATE
+    logs = [p for p in (state / "albums-run.log", state / "run.log", state / "soundcloud-run.log", state / "apple-run.log") if p.exists()]
     if not logs:
         die(f"No download log found in {tilde(state)}. Downloads started from your own terminal print there instead.")
     log = max(logs, key=lambda p: p.stat().st_mtime)
@@ -653,9 +720,92 @@ def cmd_watch():
     os.execvp("tail", ["tail", "-n", "40", "-F", str(log)])
 
 
+def cmd_migrate():
+    """Move the old layout (~/Music/Library Download[ MP3], ~/Documents lists, last-run.json,
+    .library-dl) into ~/Music/musesh. Same disk, so every move is an instant rename."""
+    if download_running():
+        die("A download is running. Wait for it to finish ('musesh watch'), then migrate.")
+    last = load_last()
+    old_incoming = Path(last.get("output", OLD_INCOMING))
+    old_library = Path(last.get("mp3_dir", OLD_LIBRARY))
+    if old_incoming in (INCOMING, LIBRARY):
+        old_incoming = OLD_INCOMING
+    if old_library in (INCOMING, LIBRARY):
+        old_library = OLD_LIBRARY
+
+    moves = []  # (from, to, what)
+    for src, dst, what in ((old_library, LIBRARY, "your collection"), (old_incoming, INCOMING, "downloads")):
+        if src.is_dir() and not dst.exists():
+            moves.append((src, dst, what))
+    unmatched_old = next((p for p in (old_incoming / "unmatched.csv", INCOMING / "unmatched.csv") if p.is_file()), None)
+    if unmatched_old and not UNMATCHED.exists():
+        moves.append((unmatched_old, UNMATCHED, "not-found list"))
+    old_list = HOME / "Documents" / "musesh-albums.txt"
+    if old_list.is_file() and not DEFAULT_ALBUM_LIST.exists():
+        moves.append((old_list, DEFAULT_ALBUM_LIST, "album list"))
+    for p in sorted((HOME / "Documents").glob("musesh-new-songs-*.txt")):
+        target = ROOT / p.name.replace("musesh-new-songs-", "new-songs-")
+        if not target.exists():
+            moves.append((p, target, "saved new-songs list"))
+    renames = [f for f in (old_incoming, old_library, INCOMING, LIBRARY) if (f / ".library-dl").is_dir()]
+
+    if not moves and not renames and not OLD_SETTINGS.exists():
+        ok(f"Already using the new layout in {tilde(ROOT)}.")
+        return
+
+    heading(f"Move everything into {tilde(ROOT)}")
+    for src, dst, what in moves:
+        print(f"  {dim(tilde(src))}\n    {accent('->')} {tilde(dst)}  {dim(what)}")
+    if renames:
+        note("hidden '.library-dl' tracking folders are renamed to '.musesh' (progress is kept)")
+    if OLD_SETTINGS.exists():
+        note(f"{tilde(OLD_SETTINGS)} becomes {tilde(SETTINGS)}, pointing at the new folders")
+    note("Nothing is copied or re-downloaded; these are renames on the same disk.")
+    if not confirm("Move them?"):
+        return
+
+    ROOT.mkdir(parents=True, exist_ok=True)
+    for src, dst, _ in moves:
+        # A file inside a folder that was just moved (e.g. unmatched.csv): follow it to its new place.
+        if not src.exists():
+            src = next((d / src.relative_to(s) for s, d, _ in moves if s in src.parents), src)
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        src.rename(dst)
+    for folder in (INCOMING, LIBRARY):
+        legacy, state = folder / ".library-dl", folder / STATE
+        if legacy.is_dir():
+            state.mkdir(exist_ok=True)
+            for item in legacy.iterdir():
+                if not (state / item.name).exists():
+                    item.rename(state / item.name)
+            if not any(legacy.iterdir()):
+                legacy.rmdir()
+
+    # Settings: point at the new folders, including paths that lived inside the old ones.
+    def remap(value):
+        path = str(value)
+        for src, dst in ((old_incoming, INCOMING), (old_library, LIBRARY)):
+            if path == str(src) or path.startswith(str(src) + os.sep):
+                path = str(dst) + path[len(str(src)):]
+        return path.replace(os.sep + ".library-dl" + os.sep, os.sep + STATE + os.sep)
+    new = dict(last)
+    for key in ("output", "mp3_dir", "xml"):
+        if new.get(key):
+            new[key] = remap(new[key])
+    new.setdefault("output", str(INCOMING))
+    new.setdefault("mp3_dir", str(LIBRARY))
+    save_last_run(new)
+    # Caches are keyed by full path; they rebuild themselves on the next run.
+    for cache in ("formats.json", "library.json"):
+        (HOME / ".cache" / "musesh" / cache).unlink(missing_ok=True)
+    ok(f"Done. Your collection is in {tilde(LIBRARY)}; new downloads go to {tilde(INCOMING)}.")
+
+
 COMMANDS = {"download": cmd_download, "continue": cmd_continue, "mp3": cmd_mp3, "status": cmd_status,
+            "soundcloud": cmd_soundcloud, "sc": cmd_soundcloud,
+            "apple": cmd_apple, "am": cmd_apple,
             "clean": cmd_clean, "albums": cmd_albums, "watch": cmd_watch, "align": cmd_align,
-            "formats": cmd_formats, "prune": cmd_prune, "library": cmd_library}
+            "formats": cmd_formats, "prune": cmd_prune, "library": cmd_library, "migrate": cmd_migrate}
 
 
 def main():
@@ -667,6 +817,8 @@ def main():
         print(f"{red('✗')} Unknown command {arg!r}", file=sys.stderr, flush=True)
         print_help()
         sys.exit(1)
+    if arg != "migrate" and (OLD_INCOMING.is_dir() or OLD_LIBRARY.is_dir()) and not ROOT.exists():
+        warn(f"Your folders use the old layout. Run 'musesh migrate' to move them into {tilde(ROOT)}.")
     try:
         COMMANDS[arg]()
     except (KeyboardInterrupt, EOFError):

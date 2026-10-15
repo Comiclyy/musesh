@@ -30,7 +30,7 @@ from ui import bold, cyan, die, dim, green, heading, note, ok, prompt, red, summ
 TARGET_KBPS = 320
 SOURCE_EXTS = {".m4a", ".mp3", ".flac", ".wav", ".aif", ".aiff", ".ogg", ".opus", ".aac"}
 LEFTOVER_AUDIO = SOURCE_EXTS | {".m4p"}
-STATE_DIR = ".library-dl"
+TRACKING = {".musesh", ".library-dl"}  # hidden tracking folders, never music
 LENGTH_TOLERANCE = 2.0  # seconds; a shorter MP3 means an interrupted conversion
 # In the MP3 folder: MP3s whose original was deleted by --prune (so they are not "orphans").
 PRUNED_RECORD = Path(".musesh") / "pruned-originals.txt"
@@ -74,7 +74,7 @@ def dest_matches(src, dest):
 
 def plan(src_root, dst_root):
     sources = sorted(p for p in src_root.rglob("*")
-                     if p.suffix.lower() in SOURCE_EXTS and STATE_DIR not in p.relative_to(src_root).parts
+                     if p.suffix.lower() in SOURCE_EXTS and not TRACKING & set(p.relative_to(src_root).parts)
                      and p.is_file())
     protected = sorted(p for p in src_root.rglob("*.m4p"))
     jobs, up_to_date = [], 0
@@ -307,7 +307,7 @@ def prune(src_root, dst_root, jobs_n):
 
     originals = sorted(p for p in src_root.rglob("*")
                        if p.suffix.lower() in SOURCE_EXTS - {".mp3"} and p.is_file()
-                       and STATE_DIR not in p.relative_to(src_root).parts)
+                       and not TRACKING & set(p.relative_to(src_root).parts))
     heading(f"Remove originals from {tilde(src_root)} once converted")
     summary([("MP3 folder", tilde(dst_root)),
              ("originals", f"{len(originals)} non-MP3 file(s), "
@@ -402,7 +402,7 @@ def prune(src_root, dst_root, jobs_n):
 
     # Remove folders the deletions emptied (Finder's .DS_Store doesn't count as contents).
     removed_dirs = 0
-    for d in sorted((d for d in src_root.rglob("*") if d.is_dir() and STATE_DIR not in d.relative_to(src_root).parts),
+    for d in sorted((d for d in src_root.rglob("*") if d.is_dir() and not TRACKING & set(d.relative_to(src_root).parts)),
                     key=lambda d: len(d.parts), reverse=True):
         if all(c.name == ".DS_Store" for c in d.iterdir()):
             (d / ".DS_Store").unlink(missing_ok=True)

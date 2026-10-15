@@ -1,4 +1,4 @@
-"""Download whole albums from a plain-text list (see ~/Documents/musesh-albums.txt).
+"""Download whole albums from a plain-text list (see ~/Music/musesh/albums.txt).
 
 Each line is resolved to Apple Music albums with the public iTunes Search API,
 shown for review, then downloaded with gamdl into the same library folder that
@@ -192,8 +192,7 @@ async def main():
     args = p.parse_args()
 
     out_dir = args.output.expanduser().resolve()
-    state_dir = out_dir / L.STATE_DIR
-    state_dir.mkdir(parents=True, exist_ok=True)
+    state_dir = L.state_dir_for(out_dir)
     cache_path = state_dir / "albums.json"
     if args.refresh:
         cache_path.unlink(missing_ok=True)

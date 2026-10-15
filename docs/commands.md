@@ -5,13 +5,100 @@ default marked, `c` to type or drag in a path, and `[Y/n]` questions. Every
 command is safe to stop with **Ctrl-C** and run again; finished work is kept
 and skipped.
 
-- [Download](#download): `musesh`, `continue`, `align`, `albums`
+- [Download](#download): `musesh`, `continue`, `align`, `albums`, `apple` / `am`, `soundcloud` / `sc`
 - [Keep an eye on it](#keep-an-eye-on-it): `watch`, `status`, `library`, `formats`
-- [Tidy up and take it with you](#tidy-up-and-take-it-with-you): `clean`, `mp3`, `prune`
+- [Tidy up and take it with you](#tidy-up-and-take-it-with-you): `clean`, `mp3`, `prune`, `migrate`
 
 ---
 
 ## Download
+
+### `musesh apple [URL]` / `musesh am [URL]`
+
+Download an Apple Music song or album directly from its share link. Omitting
+the URL prompts for one. These examples are templates; replace their URLs
+with your links. Quote links containing query parameters:
+
+```sh
+musesh am "https://music.apple.com/ca/song/song-title/123456789"
+musesh apple "https://music.apple.com/ca/album/album-title/123456789"
+musesh am "https://music.apple.com/ca/album/album-title/123456789?i=987654321"
+```
+
+An album link with `?i=...` downloads **only the selected song**. An album link
+without it shows the pending track count and asks before downloading; `-y` /
+`--yes` skips confirmation. `--review-only` resolves and displays the link
+without downloading. Artist, playlist and music-video links aren't supported.
+
+Uses gamdl, your saved Apple Music cookies, and your saved Incoming folder.
+Without saved cookies, the newest `*apple*cookie*.txt` export in Downloads is
+used if present. Override with `--cookies /path/to/music.apple.com_cookies.txt`.
+An active Apple Music subscription is required; no Library.xml is needed.
+Catalog access uses your account's storefront, as the library downloader does.
+
+Native audio, tags, artwork and `Artist/Album` organization follow the existing
+Apple Music downloader. Run `musesh mp3` afterwards for the MP3 copy. Song IDs
+share the existing Apple Music completion records: previously downloaded songs
+stay skipped, even after deletion or when supplied in a different country's
+share link. Partial album downloads resume at unfinished songs when the same
+link is rerun. Albums already marked complete by `musesh albums` stay skipped.
+`musesh watch` follows `apple-run.log`; `musesh status` includes completion in
+its existing Apple Music count. `musesh continue` still resumes Library.xml
+batches; rerun the direct link to resume a direct-link download.
+
+### `musesh soundcloud [URL]` / `musesh sc [URL]`
+
+Download a **public track or album/set** from SoundCloud. Without a URL, it
+prompts for one. Quote links so the shell doesn't interpret their query strings:
+
+```sh
+musesh sc "https://soundcloud.com/artist/track"
+musesh soundcloud "https://soundcloud.com/artist/sets/album"
+```
+
+Requires `brew install yt-dlp ffmpeg`. The Homebrew yt-dlp is preferred over
+older user-site installations on PATH. No Apple Music setup is needed.
+Public downloads need no login. Artist profiles, private links and preview-only
+audio are not supported. Album/set downloads show a summary and
+ask before starting; unavailable tracks do not prevent the others downloading.
+
+For tracks requiring your SoundCloud account, sign into SoundCloud in your
+browser and pass its name (an optional profile is supported):
+
+```sh
+musesh sc "https://soundcloud.com/artist/track" --cookies-from-browser vivaldi
+# Or use a local Netscape-format SoundCloud cookie export:
+musesh sc "https://soundcloud.com/artist/track" --cookies ~/Downloads/soundcloud-cookies.txt
+```
+
+These options are mutually exclusive and apply to this invocation only.
+Browser access may prompt for macOS Keychain permission. Cookie values are
+never printed or saved in musesh settings; explicit exports are copied to a
+private temporary jar so the original file stays unchanged. Do not paste
+cookies into chat or commit them. A login does not grant access beyond your
+account: some full tracks require SoundCloud Go+, and preview-only results
+are still skipped. See [yt-dlp's cookie instructions](https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp).
+If browser cookies cannot be decrypted (for example, Vivaldi reports “no key
+found”), musesh stops and asks for a local Netscape-format export instead.
+
+Files go into your saved Incoming folder (default `~/Music/musesh/Incoming`),
+using `Artist/Album/Title.ext`. Albums/sets use the set title and numbered
+tracks; individual tracks use their album metadata or `Unknown Album`.
+The uploader is used when artist metadata is absent. Available tags and cover
+art are embedded, and existing files are never overwritten.
+
+The best accessible native audio is kept: MP3 stays MP3, AAC/Opus stays native,
+and lossless audio stays lossless (WAV/AIFF is converted losslessly to FLAC for
+tag/artwork support). Creator-enabled originals are preferred when publicly
+accessible; streams are used otherwise. Run `musesh mp3` afterwards to make
+the MP3 copy, keeping the existing organization and native sources.
+
+Finished track IDs are remembered separately from Apple Music. Repeating a
+link, or encountering the same track in another set, skips it even after its
+local file was deleted. Failures remain retryable: rerun the same link after
+a failure or Ctrl-C. `musesh continue` remains the Apple Music batch command.
+Use `musesh status` for the handled count and `musesh watch` for the run log.
+If SoundCloud extraction stops working, try `brew upgrade yt-dlp`.
 
 ### `musesh`
 
@@ -53,7 +140,7 @@ Keeps the folder up to date with songs you've added in Apple Music since.
    | --- | --- |
    | Download into the library folder *(default)* | Downloads them now |
    | Download into a drive / another folder | Same, elsewhere |
-   | Save the list to a text file | `~/Documents/musesh-new-songs-DATE.txt`; offered again next time |
+   | Save the list to a text file | `~/Music/musesh/new-songs-DATE.txt`; offered again next time |
    | Skip for now | Offered again next time |
    | Ignore these for good | Never offered again |
 
@@ -67,7 +154,7 @@ from the folder never come back**. Details in
 ### `musesh albums [list]`
 
 Downloads whole albums from a plain-text list (default
-`~/Documents/musesh-albums.txt`). One entry per line:
+`~/Music/musesh/albums.txt`). One entry per line:
 
 ```text
 # comments start with #
@@ -91,13 +178,18 @@ differently, say), replace the line with the album's `music.apple.com` link.
 
 ### `musesh watch`
 
-Follows the log of a download running in the background, live. Ctrl-C stops
-watching, not the download.
+Follows the newest known download log, including `apple-run.log` for direct
+Apple Music links and `soundcloud-run.log` for SoundCloud. Ctrl-C stops
+watching, not the download. It watches the saved Incoming folder; direct-link
+commands write their logs even when run in your terminal.
 
 ### `musesh status`
 
-Where the library is, how many songs are downloaded, whether a download is
-running, and how many tracks are unmatched.
+Where the library and Incoming folders are, their file counts and sizes,
+whether a download is running, and how many tracks are unmatched. Apple Music
+completion counts include songs and albums from direct links; SoundCloud has
+a separate handled-track count. These progress counts remain after deletion
+and can differ from the number of files currently on disk.
 
 ### `musesh library [--by name|size|songs] [folder] [band...]`
 
@@ -165,7 +257,7 @@ read new or changed files.
 
 After deleting music (in Swinsian, Finder, anywhere), removes the folders it
 left empty, including leftover `.lrc` lyric files whose song is gone. It
-lists what it will remove and asks first. It never touches `.library-dl/`.
+lists what it will remove and asks first. It never touches the hidden `.musesh/` folders.
 
 ### `musesh mp3 [folder]`
 
@@ -173,8 +265,8 @@ Mirrors the library as **320 kbps MP3**, keeping the folder layout, tags and
 cover art. Your library is only read, never changed.
 
 - **Where:** a plugged-in USB drive is the default (`<drive>/Music`). With no
-  drive it offers `~/Music/Library Download MP3`, and "look again" once you
-  plug one in. `musesh mp3 ~/Some/Folder` skips the question.
+  drive it converts `Incoming/` into your `Library/`, and offers "look again"
+  once you plug one in. `musesh mp3 ~/Some/Folder` skips the question.
 - **Re-runs are cheap.** Each existing MP3 is checked by reading its header:
 
   | Found in the MP3 folder | Action |
@@ -215,3 +307,22 @@ runs never mistake their MP3s for orphans.
 > [!CAUTION]
 > Pruning can't be undone. Apple Music songs can be downloaded again with
 > musesh; your own files can't, unless you have them elsewhere.
+
+### `musesh migrate`
+
+Moves an older setup into `~/Music/musesh`, once:
+
+| Old | New |
+| --- | --- |
+| `~/Music/Library Download MP3` | `~/Music/musesh/Library` |
+| `~/Music/Library Download` | `~/Music/musesh/Incoming` |
+| `.../unmatched.csv` | `~/Music/musesh/unmatched.csv` |
+| `~/Documents/musesh-albums.txt` | `~/Music/musesh/albums.txt` |
+| `~/Documents/musesh-new-songs-*.txt` | `~/Music/musesh/new-songs-*.txt` |
+| hidden `.library-dl/` | hidden `.musesh/` (all progress kept) |
+| `~/.config/musesh/last-run.json` | `~/.config/musesh/settings.json` |
+
+It lists every move and asks first. Everything is a rename on the same disk,
+so it's instant and nothing is copied or downloaded again. Anything already in
+the new place is left alone. Other commands remind you to run it while the old
+folders are still around.
