@@ -14,6 +14,10 @@ Download from Apple Music and SoundCloud. Keep native audio or make an MP3 copy.
 
 [Setup](docs/setup.md) · [Commands](docs/commands.md) · [How it works](docs/how-it-works.md) · [Troubleshooting](docs/troubleshooting.md)
 
+<br/>
+
+<img src="docs/images/help.svg" width="860" alt="musesh help: all commands, including SoundCloud and Apple Music links" />
+
 </div>
 
 ## Install
