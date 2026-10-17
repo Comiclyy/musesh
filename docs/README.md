@@ -15,7 +15,6 @@ uses [ffmpeg](https://ffmpeg.org).
 | [Commands](commands.md) | You want every command, argument and prompt in one place. |
 | [Windows transfer](windows-transfer.md) | You want one-command transfers from Windows. |
 | [Swinsian](swinsian.md) | You want separate Mac/player views and file deletion. |
-| [Roadmap](../ROADMAP.md) | You want deferred ideas and implementation status. |
 | [How it works](how-it-works.md) | You want the moving parts: matching, state files, safety rules. |
 | [Troubleshooting](troubleshooting.md) | Something failed, stalled, or isn't where you expected. |
 

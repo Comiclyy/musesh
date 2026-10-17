@@ -96,6 +96,3 @@ audio conversion tools, and the Mac can be asleep once preparation finishes.
 <img src="docs/images/formats.svg" width="860" alt="musesh formats: file types and audio quality" />
 
 Run `musesh help` for all commands, or read the [command reference](docs/commands.md).
-
-Future ideas and cross-chat context live in the [roadmap](ROADMAP.md). Each
-deferred feature still needs a detailed plan before implementation.
