@@ -149,6 +149,34 @@ then `musesh prune` again.
 It's based on the megabytes converted so far, so it settles after the first
 few files.
 
+## Walkman transfers and storage
+
+**Push reports “Operation not supported” while publishing a song**<br/>
+Current push supports FAT32 publication without requiring hard links. Update
+musesh and rerun `musesh push`; verified songs remain remembered and pending
+songs are offered again. No need to delete the transfer history.
+
+**The cable disconnects during push**<br/>
+Leave the confirmed push running and reconnect the same player. Timestamped
+connection messages show it watching and resuming automatically; no new
+confirmation is needed for that batch. Ctrl-C stops the watcher. This automatic
+watching applies to Mac `push`; the Windows launcher retries on its next run.
+
+**Deleting in Swinsian did not free space**<br/>
+“Remove From Library” leaves the file on disk. “Remove and Move To Trash” moves
+it into the player's hidden Trash, which still consumes space. See
+[Swinsian deletion instructions](swinsian.md#delete-songs-from-the-player).
+A built-in player Trash cleanup command is still deferred.
+
+**A player song is missing in Swinsian**<br/>
+Check its folder: `RECEIVED` is separate from the watched `MUSIC` folder. Import
+or watch it explicitly. Rescan the watched folder after external transfers.
+
+**Ejection fails or says the player is busy**<br/>
+Finish transfers, stop playback, and close files or apps using the player.
+Stop an active/reconnecting push before running `musesh eject`. It never forces
+unmounting, and a failure or timeout does not confirm that unplugging is safe.
+
 ## Still stuck
 
 Background runs log to `~/Music/musesh/Incoming/.musesh/*.log`; `musesh watch` shows the

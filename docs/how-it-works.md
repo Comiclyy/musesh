@@ -11,6 +11,12 @@ The CLI delegates to a small set of helpers:
 6. **`mp3.py`**: the MP3 mirror and `prune`.
 7. **`apple_music.py`**: direct Apple Music song and album links.
 8. **`soundcloud.py`**: public SoundCloud track and album/set links.
+9. **`transfer.py`**: prepares MP3 batches and publishes them to a Windows share.
+10. **`music_dates.py`**: persists local addition dates through imports and conversion.
+11. **`push.py`**: previews and copies recent Library MP3s to a mounted Walkman,
+    remembering handled and excluded songs independently of what remains on it.
+12. **`eject.py`**: shares the push lock, requests normal macOS ejection, and
+    verifies the mount is gone before reporting safe removal.
 
 The Apple Music, format, library and MP3 helpers run with the Python inside
 gamdl's pipx environment, which has gamdl, `httpx` and `mutagen`. SoundCloud
@@ -103,6 +109,11 @@ then the one with the fewest tracks.
 leaves out live albums, compilations and box sets. `+eps` adds EPs from the
 **Singles & EPs** section.
 
+Album lists also accept Apple Music playlist URLs. `albums.py` resolves the
+playlist through the authenticated API and passes its URL to gamdl; the entire
+playlist is selected, including tracks by different artists. This support is
+in `albums`, not the direct `apple` / `am` command.
+
 ## Direct Apple Music links
 
 Direct Apple Music links (`apple` / `am`) use `apple_music.py` in gamdl's Python
@@ -153,6 +164,13 @@ which catches corruption that a correct-looking header would hide.
 
 ## Files on disk
 
+The optional [Windows transfer](windows-transfer.md) publishes immutable batches
+with SHA-256 manifests by renaming a completed staging directory. Its PowerShell
+launcher identifies the configured player independently of its drive letter,
+verifies each copied file, and writes a receipt per success. Mac preparation
+deduplicates against both receipts and already queued batches. A Mac-side file
+lock and a Windows-side exclusive file lock prevent concurrent runs on each side.
+
 | Path | Holds |
 | --- | --- |
 | `~/.config/musesh/settings.json` | Saved choices: export, cookies, Incoming and Library folders, batch size |
@@ -171,3 +189,8 @@ which catches corruption that a correct-looking header would hide.
 | `Incoming/.musesh/soundcloud-work/` | Staged and interrupted SoundCloud downloads, excluded from library scans |
 | `~/Music/musesh/unmatched.csv` | Tracks that couldn't be found on Apple Music |
 | `Library/.musesh/pruned-originals.txt` | MP3s whose original was pruned |
+| `<music folder>/.musesh/added.sqlite3` | Persistent local addition dates |
+| `~/Music/musesh/.transfer/` | Windows handoff settings, native-to-MP3 cache, pending batches |
+| `~/Music/musesh/.push/` | Player identity and direct-push history, including excluded and pending songs |
+| `<Windows share>/batches/` | Complete prepared batches and hidden unfinished uploads |
+| `<Windows share>/receipts/` | Successful uploads, one receipt per song version |

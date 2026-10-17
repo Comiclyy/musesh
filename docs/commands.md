@@ -7,7 +7,7 @@ and skipped.
 
 - [Download](#download): `musesh`, `continue`, `align`, `albums`, `apple` / `am`, `soundcloud` / `sc`
 - [Keep an eye on it](#keep-an-eye-on-it): `watch`, `status`, `library`, `formats`
-- [Tidy up and take it with you](#tidy-up-and-take-it-with-you): `clean`, `mp3`, `prune`, `migrate`
+- [Tidy up and take it with you](#tidy-up-and-take-it-with-you): `clean`, `mp3`, `push`, `eject`, `prepare`, `transfer setup`, `prune`, `migrate`
 
 ---
 
@@ -162,12 +162,17 @@ Miles Davis - Kind of Blue                  one album
 my bloody valentine - * +eps                every studio album, plus EPs
 Sonic Youth - *                             every studio album
 https://music.apple.com/ca/album/1446912991 an exact album
+https://music.apple.com/ca/playlist/name/PLAYLIST_ID  the tracks in a playlist
 ```
 
 It looks every line up, shows exactly which album (and edition, year and
 track count) it matched, and asks before downloading. Albums already
 downloaded are skipped, so the list can keep growing. See
 [examples/albums.txt](../examples/albums.txt).
+
+Apple Music playlist links can also be included. Their tracks are downloaded
+through gamdl; the link selects the entire playlist, including any other artists
+it contains. Private or unavailable playlists are reported as not found.
 
 If a lookup picks the wrong edition, or finds nothing (an artist credited
 differently, say), replace the line with the album's `music.apple.com` link.
@@ -280,6 +285,117 @@ cover art. Your library is only read, never changed.
   128 kbps MP3 at 320 only makes it bigger.
 - Each file prints as it finishes, with a counter and a time-left estimate
   (based on the megabytes left, so long songs don't throw it off).
+
+### `musesh eject`
+
+Safely eject the configured Walkman on macOS:
+
+```sh
+musesh eject
+```
+
+Detects the same player as `push`, refuses while a push is running (including
+waiting for reconnection), and uses normal macOS ejection to flush pending
+writes. Busy volumes are not forced off. Close files or apps using the player
+and retry if ejection fails. “Safe to unplug” appears only after successful
+ejection and verification that the volume is no longer mounted. This does not
+empty the player's Trash. Other copy operations should finish before ejecting.
+
+### `musesh push`
+
+Copy new MP3s from your local Library directly to the connected Walkman:
+
+```sh
+musesh mp3              # convert downloads into the local Library first
+musesh push             # show every proposed addition, then ask before copying
+musesh push --dry-run   # preview without copying or recording anything
+```
+
+The preview groups **every song** by artist and album, with individual and album
+sizes, a total, and free space before and after. Enter cancels; only `y` or `yes`
+starts copying. There is no automatic-confirmation flag.
+
+- **First run:** use download/addition dates from the last seven days. Older
+  Library files are remembered as excluded, even when absent from the player.
+  These are the dates preserved through conversion, not tag-edit timestamps.
+  For older files without recorded dates, file creation time is the approximation
+  (modification time if creation time is unavailable).
+- **Later runs:** pick up new additions after that initial cutoff and retry
+  unfinished work, even if it has since aged beyond seven days. The cutoff does
+  not advance past failed songs.
+- **Deletions stay deleted:** successful copies and pre-existing player paths are
+  remembered. Removing them in Swinsian, Finder, or on Windows does not make push
+  restore them. Editing a handled Library song does not queue it again either.
+  Before the first confirmed push, there is no transfer history: a recent song
+  already deleted from the player cannot be distinguished from one never copied.
+  Review that first list and cancel if it contains music you do not want.
+- **MP3s are copied as they are.** Native sources stay in Incoming, Library files
+  stay on the Mac, and existing player music is never overwritten or removed.
+- **Interrupted USB copies:** hidden temporary files are verified before becoming
+  visible MP3s. Completed songs are recorded one at a time; rerunning resumes the
+  rest after a stopped process. During a confirmed transfer, disconnection pauses
+  the copy and starts watching for the same player's volume UUID. Timestamped
+  `DISCONNECTED`, `WATCHING`, and `RECONNECTED` messages show connection status,
+  including a waiting reminder every ten seconds. Reconnecting automatically
+  retries the unfinished song without another prompt, even if macOS changes its
+  mount path. Verified songs stay skipped, different players are ignored, and
+  songs downloaded during the pause are left for a future preview. USB I/O errors
+  also trigger this pause-and-watch flow. **Ctrl-C** stops watching; a later
+  `musesh push` can resume the saved pending work with a new confirmation.
+- **Live progress:** each song shows its position in the batch and full path. In
+  a terminal, a progress bar shows percentage, bytes, speed, and time remaining,
+  followed by flushing and verification phases. A song is marked finished only
+  after verification and saving its transfer history. Redirected output keeps
+  readable per-song status lines.
+- **Insufficient space:** the complete preview is still shown, then push stops
+  without copying if the proposed batch will not fit with a small safety reserve.
+
+The usual destination is `/Volumes/WALKMAN/MUSIC`; the configured player's UUID
+is remembered so another drive is not chosen by accident. Advanced overrides are
+`--library /path/to/MP3s` and `--player /Volumes/Player` (the player must be a
+writable external mount). Per-player history lives in `~/Music/musesh/.push/`;
+keep it to retain the deletion protection. The preview-only mode leaves that
+history unchanged.
+
+`push` writes through the Mac's USB connection. Use `musesh prepare` and the
+Windows launcher when that connection is unstable. The two workflows currently
+keep separate transfer histories; push checks existing player paths but cannot
+infer earlier Windows transfers that were subsequently deleted.
+
+### `musesh prepare [day|start..end]`
+
+Prepare MP3s on the Mac and publish them into your Windows shared folder:
+
+```sh
+musesh prepare                         # new songs not yet successfully uploaded
+musesh prepare 2026-10-16              # songs added on one day
+musesh prepare 2026-10-01..2026-10-16  # inclusive range
+```
+
+The default starts tracking from setup time; earlier music is available through
+explicit dates. Dates mean addition to musesh, in the Mac's local timezone,
+and survive MP3 conversion. Existing files use creation time (or modification
+time where creation time is unavailable), so historical dates are approximate.
+Edited tags do not reset an already recorded addition date.
+
+Run `musesh-transfer.cmd` on Windows to upload all pending batches without
+prompts. Windows success receipts determine what has been uploaded. Preparation
+alone never acknowledges a song. Repeat preparation or transfer to retry failures.
+
+### `musesh transfer setup <shared-folder>`
+
+One-time setup for the [Windows transfer workflow](windows-transfer.md):
+
+```sh
+musesh transfer setup /Volumes/MuseshTransfer
+```
+
+The folder must already be mounted and writable. Setup installs the Windows
+launcher and saves the handoff location. It uses the saved Incoming folder and
+local Library folders. For a custom collection, add `--source /path/to/music`
+(repeat for multiple folders). Earlier sources take precedence over later ones
+when both contain the same relative song path. Repeating setup preserves the
+original tracking start time.
 
 ### `musesh prune [folder]`
 

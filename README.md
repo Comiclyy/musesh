@@ -41,6 +41,9 @@ musesh                     # download a Library.xml export
 musesh continue            # next library batch
 musesh align               # fetch newly added Apple Music songs
 musesh mp3                 # MP3 copy to Library or USB
+musesh push                # preview and copy new Library MP3s to your Walkman
+musesh eject               # safely eject your Walkman when finished (macOS)
+musesh prepare             # new songs ready for a Windows player transfer
 ```
 
 Replace the URL placeholders with share links, or omit them to be prompted.
@@ -50,6 +53,34 @@ Preview-only tracks are skipped.
 
 Downloads land in `~/Music/musesh/Incoming`, organized by artist and album.
 Finished tracks are remembered. `musesh mp3` keeps tags, artwork and native sources.
+
+To send finished Library MP3s directly to a connected Walkman, run **`musesh push`**.
+It lists every proposed song by artist and album, shows sizes and remaining space,
+and asks before copying. The first run considers downloads from the last seven
+days; older missing music stays alone. Successful copies and songs already on the
+player are remembered, so deleting them later does not make push restore them.
+`musesh push --dry-run` previews without copying or changing transfer history.
+If the USB connection drops during a confirmed push, it logs the disconnect,
+watches for the same Walkman, and continues automatically when reconnected.
+Press Ctrl-C to stop; the next run remembers completed work.
+When finished, run `musesh eject` on macOS and wait for “Safe to unplug”.
+For separate Mac/player views and deletions, see [Swinsian setup](docs/swinsian.md).
+
+## Transfer through Windows
+
+Prepare on your Mac; connect the MP3 player only to Windows. After a
+[one-time shared-folder setup](docs/windows-transfer.md), use:
+
+```sh
+musesh prepare                         # new songs not yet uploaded
+musesh prepare 2026-10-16              # a specific day
+musesh prepare 2026-10-01..2026-10-16  # an inclusive date range
+```
+
+On Windows, run `musesh-transfer.cmd` from the shared folder. It finds your
+configured player, copies and verifies queued music, and records successes.
+Reruns keep completed work and retry failed songs. Windows needs no Python or
+audio conversion tools, and the Mac can be asleep once preparation finishes.
 
 ## Manage your collection
 
@@ -65,3 +96,6 @@ Finished tracks are remembered. `musesh mp3` keeps tags, artwork and native sour
 <img src="docs/images/formats.svg" width="860" alt="musesh formats: file types and audio quality" />
 
 Run `musesh help` for all commands, or read the [command reference](docs/commands.md).
+
+Future ideas and cross-chat context live in the [roadmap](ROADMAP.md). Each
+deferred feature still needs a detailed plan before implementation.
