@@ -13,6 +13,7 @@ import json
 import re
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -152,6 +153,22 @@ async def resolve(entries, api, cache_path):
             continue
         print(f"  looking up {i}/{len(entries)}: {e['line']}", flush=True)
         if "url" in e:
+            parts = urlsplit(e["url"]).path.strip("/").split("/")
+            if len(parts) in (3, 4) and parts[1] == "playlist":
+                data = await api.get_playlist(parts[-1])
+                playlists = data.get("data", [])
+                if playlists:
+                    playlist = playlists[0]
+                    attrs = playlist.get("attributes", {})
+                    tracks = playlist.get("relationships", {}).get("tracks", {})
+                    e["albums"] = [{"id": parts[-1], "name": attrs.get("name", e["url"]),
+                                    "artist": attrs.get("curatorName", "Playlist"), "year": "",
+                                    "tracks": len(tracks.get("data", [])) if not tracks.get("next") else 0,
+                                    "url": e["url"]}]
+                else:
+                    e["albums"] = []
+                # Playlists can change; do not store their metadata in the album cache.
+                continue
             album_id = e["url"].split("?")[0].rstrip("/").rsplit("/", 1)[-1]
             rows = await itunes_get(ITUNES_LOOKUP_URL, {"id": album_id, "country": api.storefront})
             found = [r for r in rows if r.get("wrapperType") == "collection"]
