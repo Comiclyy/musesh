@@ -23,6 +23,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import mutagen
+from music_dates import added_at
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ui import bold, cyan, die, dim, green, heading, note, ok, prompt, red, summary, tilde, warn, yellow  # noqa: E402
@@ -113,10 +114,12 @@ ACTIVE = set()  # temp files being written, removed if the run is stopped
 ACTIVE_LOCK = threading.Lock()
 
 
-def run_job(action, src, dest):
+def run_job(action, src, dest, src_root=None, dst_root=None):
     dest.parent.mkdir(parents=True, exist_ok=True)
     if action == "copy":
         shutil.copy2(src, dest)
+        if src_root is not None:
+            added_at(dest, dst_root, added_at(src, src_root))
         return None
     tmp = dest.with_name(dest.stem + ".part.mp3")
     with ACTIVE_LOCK:
@@ -131,6 +134,8 @@ def run_job(action, src, dest):
             tmp.unlink(missing_ok=True)
             return (r.stderr.strip().splitlines() or ["ffmpeg failed"])[-1][:100]
         tmp.replace(dest)
+        if src_root is not None:
+            added_at(dest, dst_root, added_at(src, src_root))
         return None
     finally:
         with ACTIVE_LOCK:
@@ -205,7 +210,7 @@ def run(src_root, dst_root, jobs_n, assume_yes=False):
     done = failed = done_bytes = 0
     start = time.monotonic()
     pool = ThreadPoolExecutor(max_workers=jobs_n)
-    futures = {pool.submit(run_job, *job): job for job in jobs}
+    futures = {pool.submit(run_job, *job, src_root, dst_root): job for job in jobs}
     try:
         for fut in as_completed(futures):
             action, src, dest = futures[fut]

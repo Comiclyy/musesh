@@ -60,6 +60,10 @@ HELP_SECTIONS = [
     ("Tidy up and take it with you", [
         ("musesh clean", "remove folders (and leftover lyrics) emptied by deleting music"),
         ("musesh mp3 [folder]", "convert Incoming into the Library as 320 kbps MP3, or onto a USB drive"),
+        ("musesh push", "preview and copy new Library MP3s to the Walkman; deleted songs stay deleted"),
+        ("musesh eject", "safely eject the Walkman when you are done"),
+        ("musesh prepare [day|start..end]", "prepare new, unuploaded music for your Windows player transfer"),
+        ("musesh transfer setup <share>", "set up the Windows shared-folder handoff once"),
         ("musesh prune [folder]", "after 'mp3': verify every file converted, then delete the originals"),
         ("musesh migrate", "move folders from the old layout into ~/Music/musesh (once)"),
     ]),
@@ -801,7 +805,26 @@ def cmd_migrate():
     ok(f"Done. Your collection is in {tilde(LIBRARY)}; new downloads go to {tilde(INCOMING)}.")
 
 
+def cmd_transfer():
+    import transfer
+    args = sys.argv[2:] if sys.argv[1] == "transfer" else ["prepare", *sys.argv[2:]]
+    sys.exit(transfer.main(args))
+
+
+def cmd_push():
+    import push
+    sys.exit(push.main(sys.argv[2:]))
+
+
+def cmd_eject():
+    import eject
+    sys.exit(eject.main(sys.argv[2:]))
+
+
 COMMANDS = {"download": cmd_download, "continue": cmd_continue, "mp3": cmd_mp3, "status": cmd_status,
+            "prepare": cmd_transfer, "transfer": cmd_transfer,
+            "push": cmd_push,
+            "eject": cmd_eject,
             "soundcloud": cmd_soundcloud, "sc": cmd_soundcloud,
             "apple": cmd_apple, "am": cmd_apple,
             "clean": cmd_clean, "albums": cmd_albums, "watch": cmd_watch, "align": cmd_align,

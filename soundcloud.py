@@ -14,6 +14,7 @@ import sys
 import tempfile
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
+from music_dates import record_new
 
 from ui import die, heading, note, summary, tilde
 from ui import prompt
@@ -192,6 +193,7 @@ class Downloader:
             dest.unlink()
             raise
         shutil.rmtree(work, ignore_errors=True)
+        record_new(dest, self.out)
         self.log(f"Saved: {tilde(dest)}")
 
     def run(self, url):

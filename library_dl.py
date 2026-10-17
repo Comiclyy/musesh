@@ -21,6 +21,7 @@ import sys
 import time
 import unicodedata
 import urllib.parse
+from music_dates import record_new, added_at, inventory
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -104,6 +105,7 @@ def copy_local(local, out_dir):
             continue
         dest_dir.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dest)
+        record_new(dest, out_dir)
         copied += 1
     log(f"Local files: {copied} copied, {skipped} already present")
 
@@ -409,6 +411,8 @@ def run_gamdl(batch, state_dir, cookies, out_dir, gamdl_args, progress):
                     current = None
     finally:
         code = proc.wait()
+        for audio in inventory(out_dir):
+            added_at(audio, out_dir)
     if current and code == 0:
         finish_current()
     for url in failed_streak:  # a short streak at the very end: count it normally
